@@ -2,15 +2,14 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-Rizum Painter UI Font 是一个轻量的 Adobe Substance 3D Painter Python 插件，用来在当前 Painter 会话中调整软件界面字体。
+Rizum Painter UI Font 是一个Adobe Substance 3D Painter 的 Python 插件，用来调整软件界面字体。
 
 ## 用处
 
-- 调整 Painter UI 字号，不影响系统字体设置。
+- 调整 Painter UI 字号
 - 从插件根目录的 `fonts` 文件夹加载字体。
-- 在简洁的停靠面板里切换字体。
-- 可选择关闭字体 hinting，让界面显示更干净。
-- 使用 `QSettings` 记住字号比例、字体和 hinting 设置。
+- 切换字体
+- 可选择关闭字体 hinting，让渲染更舒服
 
 ## 安装步骤
 
