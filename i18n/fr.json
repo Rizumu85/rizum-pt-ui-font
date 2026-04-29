@@ -1,0 +1,14 @@
+{
+  "panel_title": "Police de l’interface",
+  "size": "Taille",
+  "font": "Police",
+  "system_default": "Police système",
+  "open_fonts_folder": "Ouvrir le dossier des polices",
+  "refresh_font_list": "Actualiser la liste des polices",
+  "refresh": "Actualiser",
+  "no_hinting": "Sans hinting",
+  "reset": "Réinitialiser",
+  "apply": "Appliquer",
+  "loaded": "Plugin Rizum Painter UI Font chargé",
+  "unloaded": "Plugin Rizum Painter UI Font déchargé"
+}

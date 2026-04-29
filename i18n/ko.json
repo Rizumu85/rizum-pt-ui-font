@@ -1,0 +1,14 @@
+{
+  "panel_title": "UI 글꼴",
+  "size": "크기",
+  "font": "글꼴",
+  "system_default": "시스템 기본값",
+  "open_fonts_folder": "글꼴 폴더 열기",
+  "refresh_font_list": "글꼴 목록 새로 고침",
+  "refresh": "새로 고침",
+  "no_hinting": "힌팅 없음",
+  "reset": "초기화",
+  "apply": "적용",
+  "loaded": "Rizum Painter UI Font 플러그인이 로드되었습니다",
+  "unloaded": "Rizum Painter UI Font 플러그인이 언로드되었습니다"
+}

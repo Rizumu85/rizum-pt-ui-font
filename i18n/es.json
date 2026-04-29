@@ -1,8 +1,8 @@
 {
-  "panel_title": "Fuente de UI",
-  "size": "Tam.",
+  "panel_title": "Fuente de interfaz",
+  "size": "Tamaño",
   "font": "Fuente",
-  "system_default": "Predeterminada",
+  "system_default": "Predeterminada del sistema",
   "open_fonts_folder": "Abrir carpeta de fuentes",
   "refresh_font_list": "Actualizar lista de fuentes",
   "refresh": "Actualizar",

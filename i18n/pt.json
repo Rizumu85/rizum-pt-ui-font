@@ -1,0 +1,14 @@
+{
+  "panel_title": "Fonte da interface",
+  "size": "Tamanho",
+  "font": "Fonte",
+  "system_default": "Padrão do sistema",
+  "open_fonts_folder": "Abrir pasta de fontes",
+  "refresh_font_list": "Atualizar lista de fontes",
+  "refresh": "Atualizar",
+  "no_hinting": "Sem hinting",
+  "reset": "Redefinir",
+  "apply": "Aplicar",
+  "loaded": "Plugin Rizum Painter UI Font carregado",
+  "unloaded": "Plugin Rizum Painter UI Font descarregado"
+}
