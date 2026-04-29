@@ -6,6 +6,7 @@ experiments with Painter's Qt UI font settings in the current session.
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -18,65 +19,61 @@ _DEFAULT_DOCK_HEIGHT = 184
 _RESET_BUTTON_WIDTH = 68
 _APPLY_BUTTON_WIDTH = 72
 _DEFAULT_LANGUAGE = "en"
-
-_TEXT = {
-    "en": {
-        "panel_title": "UI Font",
-        "size": "Size",
-        "font": "Font",
-        "system_default": "System Default",
-        "open_fonts_folder": "Open fonts folder",
-        "refresh_font_list": "Refresh font list",
-        "refresh": "Refresh",
-        "no_hinting": "No hinting",
-        "reset": "Reset",
-        "apply": "Apply",
-        "loaded": "Rizum Painter UI Font plugin loaded",
-        "unloaded": "Rizum Painter UI Font plugin unloaded",
-    },
-    "zh": {
-        "panel_title": "界面字体",
-        "size": "大小",
-        "font": "字体",
-        "system_default": "系统默认",
-        "open_fonts_folder": "打开字体文件夹",
-        "refresh_font_list": "刷新字体列表",
-        "refresh": "刷新",
-        "no_hinting": "无 Hinting",
-        "reset": "重置",
-        "apply": "应用",
-        "loaded": "Rizum Painter UI Font 插件已加载",
-        "unloaded": "Rizum Painter UI Font 插件已卸载",
-    },
-    "ja": {
-        "panel_title": "UI フォント",
-        "size": "サイズ",
-        "font": "フォント",
-        "system_default": "システム既定",
-        "open_fonts_folder": "フォントフォルダーを開く",
-        "refresh_font_list": "フォント一覧を更新",
-        "refresh": "更新",
-        "no_hinting": "ヒンティングなし",
-        "reset": "リセット",
-        "apply": "適用",
-        "loaded": "Rizum Painter UI Font プラグインを読み込みました",
-        "unloaded": "Rizum Painter UI Font プラグインを終了しました",
-    },
-    "es": {
-        "panel_title": "Fuente de UI",
-        "size": "Tam.",
-        "font": "Fuente",
-        "system_default": "Predeterminada",
-        "open_fonts_folder": "Abrir carpeta de fuentes",
-        "refresh_font_list": "Actualizar lista de fuentes",
-        "refresh": "Actualizar",
-        "no_hinting": "Sin hinting",
-        "reset": "Restablecer",
-        "apply": "Aplicar",
-        "loaded": "Plugin Rizum Painter UI Font cargado",
-        "unloaded": "Plugin Rizum Painter UI Font descargado",
-    },
+_I18N_DIR = Path(__file__).resolve().parent / "i18n"
+_FALLBACK_TEXT = {
+    "panel_title": "UI Font",
+    "size": "Size",
+    "font": "Font",
+    "system_default": "System Default",
+    "open_fonts_folder": "Open fonts folder",
+    "refresh_font_list": "Refresh font list",
+    "refresh": "Refresh",
+    "no_hinting": "No hinting",
+    "reset": "Reset",
+    "apply": "Apply",
+    "loaded": "Rizum Painter UI Font plugin loaded",
+    "unloaded": "Rizum Painter UI Font plugin unloaded",
 }
+
+
+def _load_translations():
+    translations = {_DEFAULT_LANGUAGE: dict(_FALLBACK_TEXT)}
+    if not _I18N_DIR.exists():
+        return translations
+
+    for path in sorted(_I18N_DIR.glob("*.json")):
+        language = _normalize_language(path.stem)
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except Exception:
+            continue
+        if not isinstance(data, dict):
+            continue
+        translations[language] = {str(key): str(value) for key, value in data.items()}
+        root = language.split("_", 1)[0]
+        translations.setdefault(root, translations[language])
+    return translations
+
+
+def _normalize_language(language):
+    return str(language or "").strip().lower().replace("-", "_")
+
+
+def _resolve_language(saved_language, app_language, system_language):
+    for candidate in (saved_language, app_language, system_language):
+        language = _normalize_language(candidate)
+        if not language:
+            continue
+        if language in _TEXT:
+            return language
+        root = language.split("_", 1)[0]
+        if root in _TEXT:
+            return root
+    return _DEFAULT_LANGUAGE
+
+
+_TEXT = _load_translations()
 
 
 def _load_prettier_ui():
@@ -95,16 +92,6 @@ def _load_prettier_ui():
     return rizum_ui
 
 
-def _resolve_language(saved_language, system_language):
-    language = str(saved_language or "").strip().lower().replace("-", "_")
-    if not language:
-        language = str(system_language or "").strip().lower().replace("-", "_")
-    root = language.split("_", 1)[0]
-    if root in _TEXT:
-        return root
-    return _DEFAULT_LANGUAGE
-
-
 class UiScalePanel:
     def __init__(self):
         from PySide6 import QtCore, QtGui, QtWidgets
@@ -115,7 +102,9 @@ class UiScalePanel:
         self.ui = _load_prettier_ui()
         self.store = QtCore.QSettings("Rizum", "PainterUiFont")
         self.language = _resolve_language(
-            self.store.value("language", ""), QtCore.QLocale.system().name()
+            self.store.value("language", ""),
+            QtCore.QLocale().name(),
+            QtCore.QLocale.system().name(),
         )
         self.original_font = QtWidgets.QApplication.font()
         self.font_dir = Path(__file__).resolve().parent / "fonts"

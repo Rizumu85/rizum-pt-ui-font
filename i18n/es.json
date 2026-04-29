@@ -1,0 +1,14 @@
+{
+  "panel_title": "Fuente de UI",
+  "size": "Tam.",
+  "font": "Fuente",
+  "system_default": "Predeterminada",
+  "open_fonts_folder": "Abrir carpeta de fuentes",
+  "refresh_font_list": "Actualizar lista de fuentes",
+  "refresh": "Actualizar",
+  "no_hinting": "Sin hinting",
+  "reset": "Restablecer",
+  "apply": "Aplicar",
+  "loaded": "Plugin Rizum Painter UI Font cargado",
+  "unloaded": "Plugin Rizum Painter UI Font descargado"
+}

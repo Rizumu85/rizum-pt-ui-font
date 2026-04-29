@@ -1,0 +1,14 @@
+{
+  "panel_title": "UI Font",
+  "size": "Size",
+  "font": "Font",
+  "system_default": "System Default",
+  "open_fonts_folder": "Open fonts folder",
+  "refresh_font_list": "Refresh font list",
+  "refresh": "Refresh",
+  "no_hinting": "No hinting",
+  "reset": "Reset",
+  "apply": "Apply",
+  "loaded": "Rizum Painter UI Font plugin loaded",
+  "unloaded": "Rizum Painter UI Font plugin unloaded"
+}

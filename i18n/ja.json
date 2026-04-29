@@ -1,0 +1,14 @@
+{
+  "panel_title": "UI フォント",
+  "size": "サイズ",
+  "font": "フォント",
+  "system_default": "システム既定",
+  "open_fonts_folder": "フォントフォルダーを開く",
+  "refresh_font_list": "フォント一覧を更新",
+  "refresh": "更新",
+  "no_hinting": "ヒンティングなし",
+  "reset": "リセット",
+  "apply": "適用",
+  "loaded": "Rizum Painter UI Font プラグインを読み込みました",
+  "unloaded": "Rizum Painter UI Font プラグインを終了しました"
+}

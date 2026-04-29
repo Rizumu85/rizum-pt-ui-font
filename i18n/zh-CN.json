@@ -1,0 +1,14 @@
+{
+  "panel_title": "界面字体",
+  "size": "大小",
+  "font": "字体",
+  "system_default": "系统默认",
+  "open_fonts_folder": "打开字体文件夹",
+  "refresh_font_list": "刷新字体列表",
+  "refresh": "刷新",
+  "no_hinting": "无 Hinting",
+  "reset": "重置",
+  "apply": "应用",
+  "loaded": "Rizum Painter UI Font 插件已加载",
+  "unloaded": "Rizum Painter UI Font 插件已卸载"
+}
