@@ -2,26 +2,26 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-Rizum Painter UI Font is a compact Adobe Substance 3D Painter Python plugin for adjusting the Painter interface font during the current session.
+Rizum Painter UI Font is a lightweight Adobe Substance 3D Painter Python plugin for adjusting the application interface font during the current Painter session.
 
-## What It Does
+## Purpose
 
-- Scales the Painter UI font size without changing the operating system settings.
-- Loads bundled fonts from the plugin's `fonts` folder.
-- Lets you switch font family from a small dock panel.
-- Applies optional no-hinting font rendering for a cleaner UI look.
-- Saves the selected scale, font, and hinting setting with `QSettings`.
+- Adjust the Painter UI font size without changing system font settings.
+- Load fonts from the plugin root `fonts` folder.
+- Switch font families from a compact dock panel.
+- Optionally disable font hinting for cleaner UI rendering.
+- Remember the font scale, font family, and hinting settings with `QSettings`.
 
 ## Installation
 
 1. Download or clone this repository.
-2. Copy the whole `rizum-pt-ui-font` folder into your Substance 3D Painter Python plugins folder:
+2. Copy the entire `rizum-pt-ui-font` folder into the Substance 3D Painter Python plugins directory:
 
    ```text
    Documents/Adobe/Adobe Substance 3D Painter/python/plugins/
    ```
 
-3. The final structure should look like this:
+3. The final folder structure should look like this:
 
    ```text
    python/plugins/rizum-pt-ui-font/
@@ -32,8 +32,8 @@ Rizum Painter UI Font is a compact Adobe Substance 3D Painter Python plugin for 
 
 4. Start or restart Substance 3D Painter.
 5. Enable the plugin from `Python > Plugins > rizum-pt-ui-font`.
-6. Open the `UI Font` dock panel and press `Apply`.
+6. Open the `UI Font` panel and click `Apply` to apply the settings.
 
 ## Usage
 
-Use the `Size` control to scale the interface font, choose a font from the `Font` menu, and press `Apply`. Use `Reset` to return to Painter's original UI font. The `..` button opens the `fonts` folder so you can add more `.ttf` or `.otf` files, then press the refresh button to update the list.
+Use `Size` to adjust the interface font scale, choose a font with `Font`, then click `Apply`. Click `Reset` to restore Painter's original font. The `..` button opens the `fonts` folder, where you can add new `.ttf` or `.otf` font files, then click the refresh button to update the list.
