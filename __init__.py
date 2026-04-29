@@ -6,11 +6,33 @@ experiments with Painter's Qt UI font settings in the current session.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 _PANEL = None
 _DOCK = None
 PLUGIN_VERSION = "0.2.0"
+_MIN_DOCK_WIDTH = 250
+_DEFAULT_DOCK_WIDTH = _MIN_DOCK_WIDTH
+_DEFAULT_DOCK_HEIGHT = 184
+_RESET_BUTTON_WIDTH = 68
+_APPLY_BUTTON_WIDTH = 72
+
+
+def _load_prettier_ui():
+    """Return the sibling UI kit when it is installed next to this plugin."""
+    plugin_root = Path(__file__).resolve().parent
+    prettier_root = plugin_root.parent / "rizum-pt-ui-prettier"
+    if not prettier_root.exists():
+        return None
+    prettier_path = str(prettier_root)
+    if prettier_path not in sys.path:
+        sys.path.insert(0, prettier_path)
+    try:
+        import rizum_ui
+    except Exception:
+        return None
+    return rizum_ui
 
 
 class UiScalePanel:
@@ -20,18 +42,129 @@ class UiScalePanel:
         self.QtCore = QtCore
         self.QtGui = QtGui
         self.QtWidgets = QtWidgets
+        self.ui = _load_prettier_ui()
         self.store = QtCore.QSettings("Rizum", "PainterUiFont")
         self.original_font = QtWidgets.QApplication.font()
         self.font_dir = Path(__file__).resolve().parent / "fonts"
         self._loaded_families = {}
+        self._base_panel_stylesheet = ""
 
         self.widget = QtWidgets.QWidget()
         self.widget.setWindowTitle("UI Font")
+        if self.ui is not None:
+            self._build_prettier_layout()
+        else:
+            self._build_fallback_layout()
+
+        self._populate_fonts()
+
+    def _build_prettier_layout(self):
+        QtCore = self.QtCore
+        QtWidgets = self.QtWidgets
+
+        self.ui.apply_theme(self.widget, mode="overlay")
+        self.ui.apply_compact_dock_surface(self.widget)
+        layout = self.ui.make_compact_dock_layout(self.widget)
+
+        card = self.ui.make_compact_dock_card()
+        card_layout = card.layout()
+        layout.addWidget(card)
+
+        main = QtWidgets.QWidget()
+        main.setObjectName("RizumTransparent")
+        main_layout = QtWidgets.QVBoxLayout(main)
+        main_layout.setContentsMargins(12, 12, 12, 6)
+        main_layout.setSpacing(10)
+
+        self.scale = self.ui.make_spin_input(float(self.store.value("scale", 1.0)))
+        main_layout.addWidget(
+            self.ui.make_field_row("Size", self.scale, label_width=28, gap=8, width=66)
+        )
+
+        self.font_combo = self.ui.make_combo_input()
+        self.font_combo.setMinimumWidth(54)
+        main_layout.addWidget(
+            self.ui.make_field_row("Font", self.font_combo, label_width=28, gap=8)
+        )
+
+        tool_row = QtWidgets.QHBoxLayout()
+        tool_row.setContentsMargins(36, -6, 0, 2)
+        tool_row.setSpacing(0)
+
+        icon_group = QtWidgets.QHBoxLayout()
+        icon_group.setContentsMargins(0, 0, 0, 0)
+        icon_group.setSpacing(4)
+        self.browse_btn = self.ui.make_icon_button("folder.svg", "Open fonts folder")
+        self.browse_btn.clicked.connect(self._open_fonts_dir)
+        self.refresh_btn = self.ui.make_icon_button("refresh.svg", "Refresh font list")
+        self.refresh_btn.clicked.connect(self._populate_fonts)
+        icon_group.addWidget(self.browse_btn)
+        icon_group.addWidget(self.refresh_btn)
+        tool_row.addLayout(icon_group)
+        tool_row.addStretch(1)
+
+        hint_widget = QtWidgets.QWidget()
+        hint_widget.setObjectName("RizumInlineCheckbox")
+        hint_widget.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+        hint_widget.setMinimumWidth(88)
+        hint_layout = QtWidgets.QHBoxLayout(hint_widget)
+        hint_layout.setContentsMargins(6, 3, 6, 3)
+        hint_layout.setSpacing(6)
+        hint_label = QtWidgets.QLabel("No hinting")
+        hint_label.setObjectName("RizumHintLabel")
+        hint_label.setMinimumWidth(62)
+        hint_label.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Preferred,
+            QtWidgets.QSizePolicy.Policy.Preferred,
+        )
+        hint_layout.addWidget(hint_label)
+        self.hinting_cb = self.ui.make_mock_checkbox()
+        self.hinting_cb.setChecked(_read_bool(self.store.value("hinting_off", True)))
+        hint_layout.addWidget(self.hinting_cb)
+        hint_widget.mousePressEvent = (
+            lambda event: self.hinting_cb.toggle()
+            if event.button() == QtCore.Qt.MouseButton.LeftButton
+            else None
+        )
+        tool_row.addWidget(hint_widget)
+        main_layout.addLayout(tool_row)
+
+        card_layout.addWidget(main)
+        card_layout.addStretch(1)
+
+        footer = QtWidgets.QWidget()
+        footer.setObjectName("RizumTransparent")
+        footer.setFixedHeight(48)
+        footer_outer = QtWidgets.QVBoxLayout(footer)
+        footer_outer.setContentsMargins(0, 0, 0, 0)
+        footer_outer.setSpacing(0)
+        footer_row = QtWidgets.QWidget()
+        footer_row.setObjectName("RizumTransparent")
+        footer_layout = QtWidgets.QHBoxLayout(footer_row)
+        footer_layout.setContentsMargins(10, 0, 10, 0)
+        footer_layout.setSpacing(8)
+        footer_layout.addStretch(1)
+        self.reset_btn = self.ui.ActionButton.create("Reset", "dialog-secondary")
+        self.ui.set_compact_footer_button_width(self.reset_btn, _RESET_BUTTON_WIDTH)
+        self.reset_btn.clicked.connect(self.reset)
+        self.apply_btn = self.ui.ActionButton.create("Apply", "dialog-primary")
+        self.ui.set_compact_footer_button_width(self.apply_btn, _APPLY_BUTTON_WIDTH)
+        self.apply_btn.clicked.connect(self.apply)
+        footer_layout.addWidget(self.reset_btn)
+        footer_layout.addWidget(self.apply_btn)
+        footer_outer.addWidget(footer_row, 1)
+        card_layout.addWidget(footer)
+        self.widget.setMinimumWidth(_MIN_DOCK_WIDTH)
+        self.widget.setMinimumHeight(self.widget.minimumSizeHint().height())
+        self._base_panel_stylesheet = self.widget.styleSheet()
+
+    def _build_fallback_layout(self):
+        QtWidgets = self.QtWidgets
+
         layout = QtWidgets.QVBoxLayout(self.widget)
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(4)
 
-        # Size row
         size_row = QtWidgets.QHBoxLayout()
         size_row.setSpacing(6)
         size_label = QtWidgets.QLabel("Size")
@@ -47,7 +180,6 @@ class UiScalePanel:
         size_row.addStretch(1)
         layout.addLayout(size_row)
 
-        # Font row: label + combo
         font_row = QtWidgets.QHBoxLayout()
         font_row.setSpacing(6)
         font_label = QtWidgets.QLabel("Font")
@@ -59,45 +191,50 @@ class UiScalePanel:
         font_row.addStretch(1)
         layout.addLayout(font_row)
 
-        # Actions sub-row: indented under Font
         actions_row = QtWidgets.QHBoxLayout()
         actions_row.setSpacing(2)
         spacer = QtWidgets.QWidget()
         spacer.setFixedWidth(36)
         actions_row.addWidget(spacer)
-        self.browse_btn = QtWidgets.QPushButton("..")
-        self.browse_btn.setFixedSize(24, 20)
+        self.browse_btn = _fallback_icon_button(
+            self.QtCore,
+            self.QtGui,
+            QtWidgets,
+            "folder.svg",
+            "..",
+            "Open fonts folder",
+        )
         self.browse_btn.setToolTip("Open fonts folder")
         self.browse_btn.clicked.connect(self._open_fonts_dir)
         actions_row.addWidget(self.browse_btn)
-        self.refresh_btn = QtWidgets.QPushButton("↻")
-        self.refresh_btn.setFixedSize(24, 20)
+        self.refresh_btn = _fallback_icon_button(
+            self.QtCore,
+            self.QtGui,
+            QtWidgets,
+            "refresh.svg",
+            "Refresh",
+            "Refresh font list",
+        )
         self.refresh_btn.setToolTip("Refresh font list")
         self.refresh_btn.clicked.connect(self._populate_fonts)
         actions_row.addWidget(self.refresh_btn)
         actions_row.addStretch(1)
         layout.addLayout(actions_row)
 
-        # Hinting checkbox
         self.hinting_cb = QtWidgets.QCheckBox("No hinting")
-        self.hinting_cb.setChecked(
-            _read_bool(self.store.value("hinting_off", True))
-        )
+        self.hinting_cb.setChecked(_read_bool(self.store.value("hinting_off", True)))
         layout.addWidget(self.hinting_cb)
 
         layout.addStretch(1)
 
-        # Buttons row
         btn_row = QtWidgets.QHBoxLayout()
-        self.apply_btn = QtWidgets.QPushButton("Apply")
-        self.apply_btn.clicked.connect(self.apply)
-        btn_row.addWidget(self.apply_btn)
         self.reset_btn = QtWidgets.QPushButton("Reset")
         self.reset_btn.clicked.connect(self.reset)
         btn_row.addWidget(self.reset_btn)
+        self.apply_btn = QtWidgets.QPushButton("Apply")
+        self.apply_btn.clicked.connect(self.apply)
+        btn_row.addWidget(self.apply_btn)
         layout.addLayout(btn_row)
-
-        self._populate_fonts()
 
     def _populate_fonts(self):
         self.font_combo.clear()
@@ -152,6 +289,7 @@ class UiScalePanel:
         app.setFont(font)
         for widget in app.allWidgets():
             _refresh_widget_font(widget, font)
+        self._refresh_own_panel_font(font)
 
         self.store.setValue("scale", scale)
         self.store.setValue("font_family", font_family or "")
@@ -166,6 +304,7 @@ class UiScalePanel:
         app.setFont(self.original_font)
         for widget in app.allWidgets():
             _refresh_widget_font(widget, self.original_font)
+        self._refresh_own_panel_font(self.original_font)
 
         self.scale.setValue(1.0)
         self.font_combo.setCurrentIndex(0)
@@ -179,6 +318,15 @@ class UiScalePanel:
     def close(self):
         pass
 
+    def _refresh_own_panel_font(self, font):
+        _refresh_widget_tree_font(self.widget, font)
+        if _DOCK is not None:
+            _refresh_widget_tree_font(_DOCK, font)
+        if self.ui is not None:
+            self.widget.setStyleSheet(
+                self._base_panel_stylesheet + "\n" + _build_panel_font_override(font)
+            )
+
 
 def start_plugin():
     import substance_painter as sp
@@ -187,7 +335,9 @@ def start_plugin():
     _PANEL = UiScalePanel()
     _DOCK = sp.ui.add_dock_widget(_PANEL.widget)
     _DOCK.setWindowTitle("UI Font")
+    _connect_floating_resize()
     _DOCK.show()
+    _resize_floating_dock()
 
     saved_scale = float(_PANEL.store.value("scale", 1.0))
     saved_family = _PANEL.store.value("font_family", "")
@@ -211,6 +361,35 @@ def close_plugin():
     sp.logging.info("Rizum Painter UI Font plugin unloaded")
 
 
+def _connect_floating_resize():
+    try:
+        _DOCK.topLevelChanged.connect(lambda floating: _resize_floating_dock() if floating else None)
+    except Exception:
+        pass
+
+
+def _resize_floating_dock():
+    if _DOCK is None:
+        return
+    try:
+        if hasattr(_DOCK, "isFloating") and not _DOCK.isFloating():
+            return
+    except Exception:
+        pass
+    try:
+        _DOCK.resize(_DEFAULT_DOCK_WIDTH, _DEFAULT_DOCK_HEIGHT)
+    except Exception:
+        pass
+    try:
+        _PANEL.widget.resize(_DEFAULT_DOCK_WIDTH, _DEFAULT_DOCK_HEIGHT)
+    except Exception:
+        pass
+    try:
+        _PANEL.QtCore.QTimer.singleShot(0, lambda: _DOCK.resize(_DEFAULT_DOCK_WIDTH, _DEFAULT_DOCK_HEIGHT))
+    except Exception:
+        pass
+
+
 def _refresh_widget_font(widget, font):
     try:
         widget.setFont(font)
@@ -224,6 +403,56 @@ def _refresh_widget_font(widget, font):
         widget.repaint()
     except Exception:
         pass
+
+
+def _refresh_widget_tree_font(root, font):
+    if root is None:
+        return
+    _refresh_widget_font(root, font)
+    try:
+        from PySide6 import QtWidgets
+
+        children = root.findChildren(QtWidgets.QWidget)
+    except Exception:
+        children = []
+    for child in children:
+        _refresh_widget_font(child, font)
+
+
+def _build_panel_font_override(font):
+    family = font.family().replace('"', '\\"')
+    point_size = font.pointSizeF()
+    if point_size <= 0:
+        point_size = float(font.pointSize())
+    if point_size <= 0:
+        point_size = 11.0
+    return f"""
+QWidget#RizumSurface,
+QWidget#RizumSurface *,
+QLabel#RizumFieldLabel,
+QLabel#RizumHintLabel,
+QLabel#RizumMockText,
+QPushButton[variant="dialog-secondary"],
+QPushButton[variant="dialog-primary"],
+QMenu#RizumPopupMenu {{
+    font-family: "{family}", Arial, sans-serif;
+    font-size: {point_size:.2f}pt;
+}}
+"""
+
+
+def _fallback_icon_button(QtCore, QtGui, QtWidgets, icon_name, text, tooltip):
+    button = QtWidgets.QPushButton()
+    icon_path = Path(__file__).resolve().parent / "icons" / icon_name
+    if icon_path.exists():
+        button.setIcon(QtGui.QIcon(str(icon_path)))
+        button.setIconSize(QtCore.QSize(14, 14))
+        button.setFixedSize(26, 26)
+    else:
+        button.setText(text)
+        button.setFixedSize(64 if len(text) > 2 else 24, 20)
+    button.setToolTip(tooltip)
+    return button
 
 
 def _read_bool(value):
