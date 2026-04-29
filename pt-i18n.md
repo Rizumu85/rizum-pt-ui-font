@@ -10,55 +10,47 @@ This file records the localization approach used by `rizum-pt-ui-font`. UI resiz
 
 ## Supported Languages
 
-The plugin currently ships UI strings for the language set exposed by Substance 3D Painter:
+The plugin ships UI strings for the language set exposed by Substance 3D Painter:
 
 - `en`: American English / fallback
 - `de`: Deutsch
-- `es`: Español de España
-- `fr`: Français
+- `es`: Espanol de Espana
+- `fr`: Francais
 - `it`: Italiano
-- `ja`: 日本語
-- `ko`: 한국어
-- `pt`: Português
-- `zh-CN`: 简体中文
+- `ja`: Japanese
+- `ko`: Korean
+- `pt`: Portugues
+- `zh-CN`: Simplified Chinese
 
 Translations live in `i18n/*.json`. File names are normalized internally by replacing `-` with `_` and lowercasing, so `zh-CN.json` maps to `zh_cn` and also registers the `zh` root fallback.
 
-## Language Detection
+## Effective Language Detection
 
-Qt locale APIs did not reliably follow the Painter language setting on the target Windows machine. The working detection stack is:
+The effective approach is to read Painter's runtime log:
 
-1. Environment override: `RIZUM_PT_UI_FONT_LANGUAGE` or `RIZUM_PT_UI_FONT_LANG`
-2. Local plugin override: `language.txt`
-3. Plugin QSettings override: `QSettings("Rizum", "PainterUiFont").value("language")`
-4. Painter runtime log: `%LOCALAPPDATA%/Adobe/Adobe Substance 3D Painter/log.txt`
-5. Qt app locale: `QtCore.QLocale().name()`
-6. Qt system locale: `QtCore.QLocale.system().name()`
-7. English fallback
+```text
+%LOCALAPPDATA%/Adobe/Adobe Substance 3D Painter/log.txt
+```
 
-The successful production path was the Painter log. Painter writes lines like:
+Painter writes lines like:
 
 ```text
 [INFO] <Qt> "[DBG INFO][NGL Integration]" Using locale: zh_CN
 ```
 
-The plugin reads the tail of `log.txt`, extracts the latest `Using locale: xx_XX`, then resolves that language against the available `i18n/*.json` files.
+The plugin reads the tail of `log.txt`, extracts the latest `Using locale: xx_XX`, then resolves that language against the available `i18n/*.json` files. If the locale is missing or unsupported, it falls back to English.
 
-## Manual Override Without UI
+## Removed Failed Approaches
 
-No language picker is shown in the plugin UI. For local testing or emergency override, create:
+The following approaches were tested or considered but removed from the runtime path because they did not follow Painter's language setting reliably on the target Windows machine:
 
-```text
-language.txt
-```
+- `QtCore.QLocale().name()`
+- `QtCore.QLocale.system().name()`
+- A plugin-owned `QSettings("Rizum", "PainterUiFont").value("language")` override
+- Environment-variable language overrides
+- A local `language.txt` override file
 
-in the plugin root and put one language code in it, for example:
-
-```text
-zh-CN
-```
-
-`language.txt` is ignored by Git.
+Keeping only the Painter log path avoids hidden state and makes localization behavior match the host application.
 
 ## Pending: Text-Fit Layout
 

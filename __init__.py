@@ -22,7 +22,6 @@ _RESET_BUTTON_WIDTH = 68
 _APPLY_BUTTON_WIDTH = 72
 _DEFAULT_LANGUAGE = "en"
 _I18N_DIR = Path(__file__).resolve().parent / "i18n"
-_LANGUAGE_OVERRIDE_FILE = Path(__file__).resolve().parent / "language.txt"
 _PAINTER_LOCALE_PATTERN = re.compile(r"Using locale:\s*([A-Za-z]{2}(?:[_-][A-Za-z]{2})?)")
 _FALLBACK_TEXT = {
     "panel_title": "UI Font",
@@ -80,22 +79,6 @@ def _resolve_language(*candidates):
 _TEXT = _load_translations()
 
 
-def _read_language_override():
-    candidates = [
-        os.environ.get("RIZUM_PT_UI_FONT_LANGUAGE", ""),
-        os.environ.get("RIZUM_PT_UI_FONT_LANG", ""),
-    ]
-    try:
-        candidates.append(_LANGUAGE_OVERRIDE_FILE.read_text(encoding="utf-8").strip())
-    except Exception:
-        pass
-    for candidate in candidates:
-        language = _normalize_language(candidate)
-        if language:
-            return language
-    return ""
-
-
 def _read_painter_log_language():
     local_app_data = os.environ.get("LOCALAPPDATA")
     if not local_app_data:
@@ -145,13 +128,7 @@ class UiScalePanel:
         self.QtWidgets = QtWidgets
         self.ui = _load_prettier_ui()
         self.store = QtCore.QSettings("Rizum", "PainterUiFont")
-        self.language = _resolve_language(
-            _read_language_override(),
-            self.store.value("language", ""),
-            _read_painter_log_language(),
-            QtCore.QLocale().name(),
-            QtCore.QLocale.system().name(),
-        )
+        self.language = _resolve_language(_read_painter_log_language())
         self.original_font = QtWidgets.QApplication.font()
         self.font_dir = Path(__file__).resolve().parent / "fonts"
         self._loaded_families = {}
