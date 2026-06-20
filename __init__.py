@@ -415,7 +415,8 @@ class UiScalePanel:
         self.store.sync()
 
     def close(self):
-        pass
+        self._restore_original_font()
+        self._styled_rows.clear()
 
     def _tr(self, key):
         return _TEXT.get(self.language, _TEXT[_DEFAULT_LANGUAGE]).get(
@@ -513,6 +514,21 @@ class UiScalePanel:
             )
             self._refresh_compact_metrics()
 
+    def _restore_original_font(self):
+        app = self.QtWidgets.QApplication.instance()
+        if app is None:
+            return
+        try:
+            app.setFont(self.original_font)
+        except Exception:
+            pass
+        try:
+            widgets = app.allWidgets()
+        except Exception:
+            widgets = []
+        for widget in widgets:
+            _refresh_widget_font(widget, self.original_font)
+
 
 def start_plugin():
     import substance_painter as sp
@@ -556,7 +572,7 @@ def _connect_floating_resize():
 
 
 def _resize_floating_dock():
-    if _DOCK is None:
+    if not _is_qt_object_alive(_DOCK):
         return
     try:
         if hasattr(_DOCK, "isFloating") and not _DOCK.isFloating():
@@ -568,16 +584,29 @@ def _resize_floating_dock():
     except Exception:
         pass
     try:
-        _PANEL.widget.resize(_DEFAULT_DOCK_WIDTH, _DEFAULT_DOCK_HEIGHT)
+        if _PANEL is not None and _is_qt_object_alive(_PANEL.widget):
+            _PANEL.widget.resize(_DEFAULT_DOCK_WIDTH, _DEFAULT_DOCK_HEIGHT)
     except Exception:
         pass
     try:
-        _PANEL.QtCore.QTimer.singleShot(0, lambda: _DOCK.resize(_DEFAULT_DOCK_WIDTH, _DEFAULT_DOCK_HEIGHT))
+        if _PANEL is not None:
+            _PANEL.QtCore.QTimer.singleShot(0, _resize_floating_dock_later)
+    except Exception:
+        pass
+
+
+def _resize_floating_dock_later():
+    if not _is_qt_object_alive(_DOCK):
+        return
+    try:
+        _DOCK.resize(_DEFAULT_DOCK_WIDTH, _DEFAULT_DOCK_HEIGHT)
     except Exception:
         pass
 
 
 def _refresh_widget_font(widget, font):
+    if not _is_qt_object_alive(widget):
+        return
     try:
         widget.setFont(font)
     except Exception:
@@ -593,7 +622,7 @@ def _refresh_widget_font(widget, font):
 
 
 def _refresh_widget_tree_font(root, font):
-    if root is None:
+    if not _is_qt_object_alive(root):
         return
     _refresh_widget_font(root, font)
     try:
@@ -604,6 +633,23 @@ def _refresh_widget_tree_font(root, font):
         children = []
     for child in children:
         _refresh_widget_font(child, font)
+
+
+def _is_qt_object_alive(obj):
+    if obj is None:
+        return False
+    try:
+        import shiboken6
+
+        return shiboken6.isValid(obj)
+    except Exception:
+        try:
+            obj.objectName()
+        except RuntimeError:
+            return False
+        except Exception:
+            return False
+        return True
 
 
 def _build_panel_font_override(font):
