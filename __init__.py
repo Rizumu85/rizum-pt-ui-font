@@ -20,6 +20,8 @@ _DEFAULT_DOCK_WIDTH = _MIN_DOCK_WIDTH
 _DEFAULT_DOCK_HEIGHT = 184
 _RESET_BUTTON_WIDTH = 68
 _APPLY_BUTTON_WIDTH = 72
+_HINT_ROW_MIN_WIDTH = 108
+_HINT_ROW_MAX_WIDTH = 184
 _DEFAULT_LANGUAGE = "en"
 _I18N_DIR = Path(__file__).resolve().parent / "i18n"
 _PAINTER_LOCALE_PATTERN = re.compile(r"Using locale:\s*([A-Za-z]{2}(?:[_-][A-Za-z]{2})?)")
@@ -175,6 +177,8 @@ class UiScalePanel:
         main_layout.addWidget(self._styled_rows["size"])
 
         self.font_combo = self.ui.make_combo_input()
+        if hasattr(self.font_combo, "setFitToContents"):
+            self.font_combo.setFitToContents(False)
         self.font_combo.setMinimumWidth(54)
         self._styled_rows["font"] = self.ui.make_field_row(
             self._tr("font"),
@@ -206,8 +210,8 @@ class UiScalePanel:
         self.hint_widget = self.ui.make_inline_checkbox_row(
             self._tr("no_hinting"),
             self.hinting_cb,
-            minimum=88,
-            maximum=150,
+            minimum=_HINT_ROW_MIN_WIDTH,
+            maximum=_HINT_ROW_MAX_WIDTH,
         )
         tool_row.addWidget(self.hint_widget)
         main_layout.addLayout(tool_row)
@@ -429,7 +433,7 @@ class UiScalePanel:
                 [self._tr("size"), self._tr("font")],
                 widget=self.widget,
                 minimum=28,
-                maximum=56,
+                maximum=72,
                 padding=6,
             )
         return 44 if self.language in {"ja", "es"} else 28
@@ -467,8 +471,8 @@ class UiScalePanel:
             self.ui.update_inline_checkbox_row(
                 self.hint_widget,
                 self._tr("no_hinting"),
-                minimum=88,
-                maximum=150,
+                minimum=_HINT_ROW_MIN_WIDTH,
+                maximum=_HINT_ROW_MAX_WIDTH,
             )
         if hasattr(self, "reset_btn"):
             self.ui.set_compact_footer_button_width(
