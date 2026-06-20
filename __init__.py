@@ -219,10 +219,10 @@ class UiScalePanel:
         card_layout.addWidget(main)
         card_layout.addStretch(1)
 
-        self.footer_widget = QtWidgets.QWidget()
-        self.footer_widget.setObjectName("RizumTransparent")
-        self.footer_widget.setFixedHeight(48)
-        footer_outer = QtWidgets.QVBoxLayout(self.footer_widget)
+        footer = QtWidgets.QWidget()
+        footer.setObjectName("RizumTransparent")
+        footer.setFixedHeight(48)
+        footer_outer = QtWidgets.QVBoxLayout(footer)
         footer_outer.setContentsMargins(0, 0, 0, 0)
         footer_outer.setSpacing(0)
         footer_row = QtWidgets.QWidget()
@@ -254,7 +254,7 @@ class UiScalePanel:
         footer_layout.addWidget(self.reset_btn)
         footer_layout.addWidget(self.apply_btn)
         footer_outer.addWidget(footer_row, 1)
-        card_layout.addWidget(self.footer_widget)
+        card_layout.addWidget(footer)
         self._refresh_compact_metrics()
         self.widget.setMinimumWidth(max(_MIN_DOCK_WIDTH, self.widget.minimumSizeHint().width()))
         self.widget.setMinimumHeight(self.widget.minimumSizeHint().height())
@@ -432,9 +432,9 @@ class UiScalePanel:
             return self.ui.compact_label_width(
                 [self._tr("size"), self._tr("font")],
                 widget=self.widget,
-                minimum=28,
-                maximum=72,
-                padding=6,
+                minimum=36,
+                maximum=116,
+                padding=14,
             )
         return 44 if self.language in {"ja", "es"} else 28
 
@@ -444,9 +444,37 @@ class UiScalePanel:
         return self.ui.compact_text_width(
             "2.00",
             widget=self.scale,
-            minimum=66,
-            maximum=84,
-            padding=30,
+            minimum=74,
+            maximum=120,
+            padding=42,
+        )
+
+    def _font_control_width(self):
+        if self.ui is None:
+            return 160
+
+        labels = []
+        try:
+            labels.extend(str(item[0]) for item in self.font_combo._items)
+        except Exception:
+            pass
+        try:
+            current_text = self.font_combo.currentText()
+        except Exception:
+            current_text = ""
+        if current_text:
+            labels.append(current_text)
+        if not labels:
+            labels = [self._tr("system_default")]
+
+        return max(
+            self.ui.compact_text_width(
+                text,
+                widget=self.font_combo,
+                minimum=0,
+                padding=46,
+            )
+            for text in labels
         )
 
     def _refresh_compact_metrics(self):
@@ -466,6 +494,7 @@ class UiScalePanel:
             self.ui.update_compact_field_row(
                 self._styled_rows["font"],
                 label_width=label_width,
+                control_width=self._font_control_width(),
             )
         if hasattr(self, "hint_widget"):
             self.ui.update_inline_checkbox_row(
@@ -482,7 +511,6 @@ class UiScalePanel:
                     minimum=_RESET_BUTTON_WIDTH,
                     maximum=118,
                 ),
-                height=self._footer_button_height(self.reset_btn),
             )
         if hasattr(self, "apply_btn"):
             self.ui.set_compact_footer_button_width(
@@ -492,30 +520,21 @@ class UiScalePanel:
                     minimum=_APPLY_BUTTON_WIDTH,
                     maximum=112,
                 ),
-                height=self._footer_button_height(self.apply_btn),
             )
-        if hasattr(self, "footer_widget"):
-            button_height = max(
-                self._footer_button_height(getattr(self, "reset_btn", None)),
-                self._footer_button_height(getattr(self, "apply_btn", None)),
-            )
-            self.footer_widget.setFixedHeight(max(48, button_height + 22))
 
         self.widget.setMinimumWidth(0)
         min_width = max(_MIN_DOCK_WIDTH, self.widget.minimumSizeHint().width())
-        min_height = max(_DEFAULT_DOCK_HEIGHT, self.widget.minimumSizeHint().height())
         self.widget.setMinimumWidth(min_width)
-        self.widget.setMinimumHeight(min_height)
+        self.widget.setMinimumHeight(self.widget.minimumSizeHint().height())
         try:
             if _DOCK is not None:
                 _DOCK.setMinimumWidth(min_width)
-                _DOCK.setMinimumHeight(min_height)
                 if (
                     hasattr(_DOCK, "isFloating")
                     and _DOCK.isFloating()
-                    and (_DOCK.width() < min_width or _DOCK.height() < min_height)
+                    and _DOCK.width() < min_width
                 ):
-                    _DOCK.resize(min_width, max(_DOCK.height(), min_height))
+                    _DOCK.resize(min_width, max(_DOCK.height(), _DEFAULT_DOCK_HEIGHT))
         except Exception:
             pass
 
@@ -528,15 +547,6 @@ class UiScalePanel:
                 self._base_panel_stylesheet + "\n" + _build_panel_font_override(font)
             )
             self._refresh_compact_metrics()
-
-    def _footer_button_height(self, button):
-        if button is None:
-            return 26
-        try:
-            metrics = self.QtGui.QFontMetrics(button.font())
-            return max(26, metrics.height() + 8)
-        except Exception:
-            return 26
 
     def _restore_original_font(self):
         app = self.QtWidgets.QApplication.instance()
@@ -604,13 +614,12 @@ def _resize_floating_dock():
     except Exception:
         pass
     try:
-        height = _current_dock_height()
-        _DOCK.resize(_DEFAULT_DOCK_WIDTH, height)
+        _DOCK.resize(_DEFAULT_DOCK_WIDTH, _DEFAULT_DOCK_HEIGHT)
     except Exception:
         pass
     try:
         if _PANEL is not None and _is_qt_object_alive(_PANEL.widget):
-            _PANEL.widget.resize(_DEFAULT_DOCK_WIDTH, _current_dock_height())
+            _PANEL.widget.resize(_DEFAULT_DOCK_WIDTH, _DEFAULT_DOCK_HEIGHT)
     except Exception:
         pass
     try:
@@ -624,18 +633,9 @@ def _resize_floating_dock_later():
     if not _is_qt_object_alive(_DOCK):
         return
     try:
-        _DOCK.resize(_DEFAULT_DOCK_WIDTH, _current_dock_height())
+        _DOCK.resize(_DEFAULT_DOCK_WIDTH, _DEFAULT_DOCK_HEIGHT)
     except Exception:
         pass
-
-
-def _current_dock_height():
-    if _PANEL is None or not _is_qt_object_alive(_PANEL.widget):
-        return _DEFAULT_DOCK_HEIGHT
-    try:
-        return max(_DEFAULT_DOCK_HEIGHT, _PANEL.widget.minimumSizeHint().height())
-    except Exception:
-        return _DEFAULT_DOCK_HEIGHT
 
 
 def _refresh_widget_font(widget, font):
