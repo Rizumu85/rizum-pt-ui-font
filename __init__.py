@@ -16,6 +16,7 @@ _PLUGIN_ROOT = Path(__file__).resolve().parent
 if str(_PLUGIN_ROOT) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_ROOT))
 
+from font_catalog import FontCatalog, QtFontDatabaseAdapter
 from font_session import FontSession, FontState, QSettingsFontSettings, QtFontApplier
 
 try:
@@ -25,7 +26,7 @@ except Exception:
 
 _PANEL = None
 _DOCK = None
-PLUGIN_VERSION = "0.4.2"
+PLUGIN_VERSION = "0.4.3"
 _MIN_DOCK_WIDTH = 250
 _DEFAULT_DOCK_WIDTH = _MIN_DOCK_WIDTH
 _DEFAULT_DOCK_HEIGHT = 184
@@ -128,11 +129,6 @@ def _load_ui_kit():
         return None
 
 
-def _load_prettier_ui():
-    """Compatibility alias for older local smoke tests."""
-    return _load_ui_kit()
-
-
 class UiScalePanel:
     def __init__(self):
         from PySide6 import QtCore, QtGui, QtWidgets
@@ -156,8 +152,8 @@ class UiScalePanel:
                 self._refresh_own_panel_font,
             ),
         )
-        self.font_dir = Path(__file__).resolve().parent / "fonts"
-        self._loaded_families = {}
+        self.font_dir = _PLUGIN_ROOT / "fonts"
+        self.font_catalog = FontCatalog(self.font_dir, QtFontDatabaseAdapter(QtGui))
         self._base_panel_stylesheet = ""
         self._styled_rows = {}
 
@@ -409,32 +405,18 @@ class UiScalePanel:
 
     def _populate_fonts(self):
         self.font_combo.blockSignals(True)
-        self.font_combo.clear()
-        self._loaded_families.clear()
+        try:
+            self.font_combo.clear()
+            for option in self.font_catalog.options(self._tr("system_default")):
+                self.font_combo.addItem(option.label, option.family or None)
 
-        system_default = self._tr("system_default")
-        self.font_combo.addItem(system_default, None)
-        self._loaded_families[system_default] = None
-
-        if self.font_dir.exists():
-            for font_path in sorted(self.font_dir.iterdir()):
-                if font_path.suffix.lower() not in {".ttf", ".otf"}:
-                    continue
-                font_id = self.QtGui.QFontDatabase.addApplicationFont(str(font_path))
-                if font_id < 0:
-                    continue
-                families = self.QtGui.QFontDatabase.applicationFontFamilies(font_id)
-                for family in families:
-                    if family not in self._loaded_families:
-                        self._loaded_families[family] = family
-                        self.font_combo.addItem(family, family)
-
-        saved_family = self._saved_state.family
-        if saved_family:
-            idx = self.font_combo.findData(saved_family)
-            if idx >= 0:
-                self.font_combo.setCurrentIndex(idx)
-        self.font_combo.blockSignals(False)
+            saved_family = self._saved_state.family
+            if saved_family:
+                idx = self.font_combo.findData(saved_family)
+                if idx >= 0:
+                    self.font_combo.setCurrentIndex(idx)
+        finally:
+            self.font_combo.blockSignals(False)
 
     def _open_fonts_dir(self):
         self.font_dir.mkdir(parents=True, exist_ok=True)

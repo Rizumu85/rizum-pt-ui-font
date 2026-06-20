@@ -12,6 +12,7 @@ REQUIRED_PATHS = (
     ".gitignore",
     "CONTEXT.md",
     "distribution.py",
+    "font_catalog.py",
     "font_session.py",
     "README.md",
     "THIRD_PARTY_NOTICES.md",
