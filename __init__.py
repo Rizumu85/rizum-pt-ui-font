@@ -219,10 +219,10 @@ class UiScalePanel:
         card_layout.addWidget(main)
         card_layout.addStretch(1)
 
-        footer = QtWidgets.QWidget()
-        footer.setObjectName("RizumTransparent")
-        footer.setFixedHeight(48)
-        footer_outer = QtWidgets.QVBoxLayout(footer)
+        self.footer_widget = QtWidgets.QWidget()
+        self.footer_widget.setObjectName("RizumTransparent")
+        self.footer_widget.setFixedHeight(48)
+        footer_outer = QtWidgets.QVBoxLayout(self.footer_widget)
         footer_outer.setContentsMargins(0, 0, 0, 0)
         footer_outer.setSpacing(0)
         footer_row = QtWidgets.QWidget()
@@ -254,7 +254,7 @@ class UiScalePanel:
         footer_layout.addWidget(self.reset_btn)
         footer_layout.addWidget(self.apply_btn)
         footer_outer.addWidget(footer_row, 1)
-        card_layout.addWidget(footer)
+        card_layout.addWidget(self.footer_widget)
         self._refresh_compact_metrics()
         self.widget.setMinimumWidth(max(_MIN_DOCK_WIDTH, self.widget.minimumSizeHint().width()))
         self.widget.setMinimumHeight(self.widget.minimumSizeHint().height())
@@ -482,6 +482,7 @@ class UiScalePanel:
                     minimum=_RESET_BUTTON_WIDTH,
                     maximum=118,
                 ),
+                height=self._footer_button_height(self.reset_btn),
             )
         if hasattr(self, "apply_btn"):
             self.ui.set_compact_footer_button_width(
@@ -491,20 +492,30 @@ class UiScalePanel:
                     minimum=_APPLY_BUTTON_WIDTH,
                     maximum=112,
                 ),
+                height=self._footer_button_height(self.apply_btn),
             )
+        if hasattr(self, "footer_widget"):
+            button_height = max(
+                self._footer_button_height(getattr(self, "reset_btn", None)),
+                self._footer_button_height(getattr(self, "apply_btn", None)),
+            )
+            self.footer_widget.setFixedHeight(max(48, button_height + 22))
 
         self.widget.setMinimumWidth(0)
         min_width = max(_MIN_DOCK_WIDTH, self.widget.minimumSizeHint().width())
+        min_height = max(_DEFAULT_DOCK_HEIGHT, self.widget.minimumSizeHint().height())
         self.widget.setMinimumWidth(min_width)
+        self.widget.setMinimumHeight(min_height)
         try:
             if _DOCK is not None:
                 _DOCK.setMinimumWidth(min_width)
+                _DOCK.setMinimumHeight(min_height)
                 if (
                     hasattr(_DOCK, "isFloating")
                     and _DOCK.isFloating()
-                    and _DOCK.width() < min_width
+                    and (_DOCK.width() < min_width or _DOCK.height() < min_height)
                 ):
-                    _DOCK.resize(min_width, max(_DOCK.height(), _DEFAULT_DOCK_HEIGHT))
+                    _DOCK.resize(min_width, max(_DOCK.height(), min_height))
         except Exception:
             pass
 
@@ -517,6 +528,15 @@ class UiScalePanel:
                 self._base_panel_stylesheet + "\n" + _build_panel_font_override(font)
             )
             self._refresh_compact_metrics()
+
+    def _footer_button_height(self, button):
+        if button is None:
+            return 26
+        try:
+            metrics = self.QtGui.QFontMetrics(button.font())
+            return max(26, metrics.height() + 8)
+        except Exception:
+            return 26
 
     def _restore_original_font(self):
         app = self.QtWidgets.QApplication.instance()
@@ -584,12 +604,13 @@ def _resize_floating_dock():
     except Exception:
         pass
     try:
-        _DOCK.resize(_DEFAULT_DOCK_WIDTH, _DEFAULT_DOCK_HEIGHT)
+        height = _current_dock_height()
+        _DOCK.resize(_DEFAULT_DOCK_WIDTH, height)
     except Exception:
         pass
     try:
         if _PANEL is not None and _is_qt_object_alive(_PANEL.widget):
-            _PANEL.widget.resize(_DEFAULT_DOCK_WIDTH, _DEFAULT_DOCK_HEIGHT)
+            _PANEL.widget.resize(_DEFAULT_DOCK_WIDTH, _current_dock_height())
     except Exception:
         pass
     try:
@@ -603,9 +624,18 @@ def _resize_floating_dock_later():
     if not _is_qt_object_alive(_DOCK):
         return
     try:
-        _DOCK.resize(_DEFAULT_DOCK_WIDTH, _DEFAULT_DOCK_HEIGHT)
+        _DOCK.resize(_DEFAULT_DOCK_WIDTH, _current_dock_height())
     except Exception:
         pass
+
+
+def _current_dock_height():
+    if _PANEL is None or not _is_qt_object_alive(_PANEL.widget):
+        return _DEFAULT_DOCK_HEIGHT
+    try:
+        return max(_DEFAULT_DOCK_HEIGHT, _PANEL.widget.minimumSizeHint().height())
+    except Exception:
+        return _DEFAULT_DOCK_HEIGHT
 
 
 def _refresh_widget_font(widget, font):
