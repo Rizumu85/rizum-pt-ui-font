@@ -12,6 +12,15 @@ import re
 import sys
 from pathlib import Path
 
+_PLUGIN_ROOT = Path(__file__).resolve().parent
+if str(_PLUGIN_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PLUGIN_ROOT))
+
+try:
+    from ui_kit_loader import load_ui_kit as _load_bundled_ui_kit
+except Exception:
+    _load_bundled_ui_kit = None
+
 _PANEL = None
 _DOCK = None
 PLUGIN_VERSION = "0.4.0"
@@ -23,7 +32,7 @@ _SAVE_BUTTON_WIDTH = 72
 _HINT_ROW_MIN_WIDTH = 108
 _HINT_ROW_MAX_WIDTH = 184
 _DEFAULT_LANGUAGE = "en"
-_I18N_DIR = Path(__file__).resolve().parent / "i18n"
+_I18N_DIR = _PLUGIN_ROOT / "i18n"
 _PAINTER_LOCALE_PATTERN = re.compile(r"Using locale:\s*([A-Za-z]{2}(?:[_-][A-Za-z]{2})?)")
 _FALLBACK_TEXT = {
     "panel_title": "UI Font",
@@ -107,39 +116,19 @@ def _read_painter_log_language():
     return matches[-1] if matches else ""
 
 
+def _load_ui_kit():
+    """Return the compact UI kit used by the panel."""
+    if _load_bundled_ui_kit is None:
+        return None
+    try:
+        return _load_bundled_ui_kit(_PLUGIN_ROOT)
+    except Exception:
+        return None
+
+
 def _load_prettier_ui():
-    """Return the bundled UI kit, with an opt-in sibling dev override.
-
-    Distribution builds ship a frozen copy of rizum_ui/ inside this plugin so
-    it works standalone and is not affected by whether users have
-    rizum-pt-ui-prettier installed. During development, set
-    RIZUM_UI_FONT_USE_SIBLING_PRETTIER=1 to load the sibling source copy.
-    """
-    plugin_root = Path(__file__).resolve().parent
-    use_sibling = os.environ.get("RIZUM_UI_FONT_USE_SIBLING_PRETTIER", "").strip().lower()
-    search_roots = []
-    if use_sibling in {"1", "true", "yes", "on"}:
-        search_roots.append(plugin_root.parent / "rizum-pt-ui-prettier")
-    search_roots.append(plugin_root)
-
-    for root in search_roots:
-        if not (root / "rizum_ui").exists():
-            continue
-        root_path = str(root)
-        if root_path in sys.path:
-            sys.path.remove(root_path)
-        sys.path.insert(0, root_path)
-        # Force re-import: SP keeps sys.modules across plugin reloads, so a
-        # stale rizum_ui from another plugin path would shadow this plugin's
-        # bundled copy.
-        for mod_name in list(sys.modules):
-            if mod_name == "rizum_ui" or mod_name.startswith("rizum_ui."):
-                del sys.modules[mod_name]
-        try:
-            import rizum_ui
-            return rizum_ui
-        except Exception:
-            continue
+    """Compatibility alias for older local smoke tests."""
+    return _load_ui_kit()
     return None
 
 
@@ -150,7 +139,7 @@ class UiScalePanel:
         self.QtCore = QtCore
         self.QtGui = QtGui
         self.QtWidgets = QtWidgets
-        self.ui = _load_prettier_ui()
+        self.ui = _load_ui_kit()
         self.store = QtCore.QSettings("Rizum", "PainterUiFont")
         self.language = _resolve_language(_read_painter_log_language())
         self.original_font = QtWidgets.QApplication.font()
