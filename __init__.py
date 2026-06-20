@@ -133,6 +133,7 @@ class UiScalePanel:
         self.font_dir = Path(__file__).resolve().parent / "fonts"
         self._loaded_families = {}
         self._base_panel_stylesheet = ""
+        self._styled_rows = {}
 
         self.widget = QtWidgets.QWidget()
         self.widget.setWindowTitle(self._tr("panel_title"))
@@ -142,6 +143,7 @@ class UiScalePanel:
             self._build_fallback_layout()
 
         self._populate_fonts()
+        self._refresh_compact_metrics()
 
     def _build_prettier_layout(self):
         QtCore = self.QtCore
@@ -160,31 +162,31 @@ class UiScalePanel:
         main_layout = QtWidgets.QVBoxLayout(main)
         main_layout.setContentsMargins(12, 12, 12, 6)
         main_layout.setSpacing(10)
+        label_width = self._label_width()
 
         self.scale = self.ui.make_spin_input(float(self.store.value("scale", 1.0)))
-        main_layout.addWidget(
-            self.ui.make_field_row(
-                self._tr("size"),
-                self.scale,
-                label_width=self._label_width(),
-                gap=8,
-                width=66,
-            )
+        self._styled_rows["size"] = self.ui.make_field_row(
+            self._tr("size"),
+            self.scale,
+            label_width=label_width,
+            gap=8,
+            width=self._scale_control_width(),
         )
+        main_layout.addWidget(self._styled_rows["size"])
 
         self.font_combo = self.ui.make_combo_input()
         self.font_combo.setMinimumWidth(54)
-        main_layout.addWidget(
-            self.ui.make_field_row(
-                self._tr("font"),
-                self.font_combo,
-                label_width=self._label_width(),
-                gap=8,
-            )
+        self._styled_rows["font"] = self.ui.make_field_row(
+            self._tr("font"),
+            self.font_combo,
+            label_width=label_width,
+            gap=8,
         )
+        main_layout.addWidget(self._styled_rows["font"])
 
         tool_row = QtWidgets.QHBoxLayout()
-        tool_row.setContentsMargins(self._label_width() + 8, -6, 0, 2)
+        self.tool_row = tool_row
+        tool_row.setContentsMargins(label_width + 8, -6, 0, 2)
         tool_row.setSpacing(0)
 
         icon_group = QtWidgets.QHBoxLayout()
@@ -199,30 +201,15 @@ class UiScalePanel:
         tool_row.addLayout(icon_group)
         tool_row.addStretch(1)
 
-        hint_widget = QtWidgets.QWidget()
-        hint_widget.setObjectName("RizumInlineCheckbox")
-        hint_widget.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
-        hint_widget.setMinimumWidth(88)
-        hint_layout = QtWidgets.QHBoxLayout(hint_widget)
-        hint_layout.setContentsMargins(6, 3, 6, 3)
-        hint_layout.setSpacing(6)
-        hint_label = QtWidgets.QLabel(self._tr("no_hinting"))
-        hint_label.setObjectName("RizumHintLabel")
-        hint_label.setMinimumWidth(62)
-        hint_label.setSizePolicy(
-            QtWidgets.QSizePolicy.Policy.Preferred,
-            QtWidgets.QSizePolicy.Policy.Preferred,
-        )
-        hint_layout.addWidget(hint_label)
         self.hinting_cb = self.ui.make_mock_checkbox()
         self.hinting_cb.setChecked(_read_bool(self.store.value("hinting_off", True)))
-        hint_layout.addWidget(self.hinting_cb)
-        hint_widget.mousePressEvent = (
-            lambda event: self.hinting_cb.toggle()
-            if event.button() == QtCore.Qt.MouseButton.LeftButton
-            else None
+        self.hint_widget = self.ui.make_inline_checkbox_row(
+            self._tr("no_hinting"),
+            self.hinting_cb,
+            minimum=88,
+            maximum=150,
         )
-        tool_row.addWidget(hint_widget)
+        tool_row.addWidget(self.hint_widget)
         main_layout.addLayout(tool_row)
 
         card_layout.addWidget(main)
@@ -241,16 +228,31 @@ class UiScalePanel:
         footer_layout.setSpacing(8)
         footer_layout.addStretch(1)
         self.reset_btn = self.ui.ActionButton.create(self._tr("reset"), "dialog-secondary")
-        self.ui.set_compact_footer_button_width(self.reset_btn, _RESET_BUTTON_WIDTH)
+        self.ui.set_compact_footer_button_width(
+            self.reset_btn,
+            self.ui.compact_footer_button_width(
+                self.reset_btn,
+                minimum=_RESET_BUTTON_WIDTH,
+                maximum=118,
+            ),
+        )
         self.reset_btn.clicked.connect(self.reset)
         self.apply_btn = self.ui.ActionButton.create(self._tr("apply"), "dialog-primary")
-        self.ui.set_compact_footer_button_width(self.apply_btn, _APPLY_BUTTON_WIDTH)
+        self.ui.set_compact_footer_button_width(
+            self.apply_btn,
+            self.ui.compact_footer_button_width(
+                self.apply_btn,
+                minimum=_APPLY_BUTTON_WIDTH,
+                maximum=112,
+            ),
+        )
         self.apply_btn.clicked.connect(self.apply)
         footer_layout.addWidget(self.reset_btn)
         footer_layout.addWidget(self.apply_btn)
         footer_outer.addWidget(footer_row, 1)
         card_layout.addWidget(footer)
-        self.widget.setMinimumWidth(_MIN_DOCK_WIDTH)
+        self._refresh_compact_metrics()
+        self.widget.setMinimumWidth(max(_MIN_DOCK_WIDTH, self.widget.minimumSizeHint().width()))
         self.widget.setMinimumHeight(self.widget.minimumSizeHint().height())
         self._base_panel_stylesheet = self.widget.styleSheet()
 
@@ -421,7 +423,85 @@ class UiScalePanel:
         )
 
     def _label_width(self):
+        if self.ui is not None:
+            return self.ui.compact_label_width(
+                [self._tr("size"), self._tr("font")],
+                widget=self.widget,
+                minimum=28,
+                maximum=56,
+                padding=6,
+            )
         return 44 if self.language in {"ja", "es"} else 28
+
+    def _scale_control_width(self):
+        if self.ui is None:
+            return 66
+        return self.ui.compact_text_width(
+            "2.00",
+            widget=self.scale,
+            minimum=66,
+            maximum=84,
+            padding=30,
+        )
+
+    def _refresh_compact_metrics(self):
+        if self.ui is None:
+            return
+
+        label_width = self._label_width()
+        if hasattr(self, "tool_row"):
+            self.tool_row.setContentsMargins(label_width + 8, -6, 0, 2)
+        if "size" in self._styled_rows:
+            self.ui.update_compact_field_row(
+                self._styled_rows["size"],
+                label_width=label_width,
+                control_width=self._scale_control_width(),
+            )
+        if "font" in self._styled_rows:
+            self.ui.update_compact_field_row(
+                self._styled_rows["font"],
+                label_width=label_width,
+            )
+        if hasattr(self, "hint_widget"):
+            self.ui.update_inline_checkbox_row(
+                self.hint_widget,
+                self._tr("no_hinting"),
+                minimum=88,
+                maximum=150,
+            )
+        if hasattr(self, "reset_btn"):
+            self.ui.set_compact_footer_button_width(
+                self.reset_btn,
+                self.ui.compact_footer_button_width(
+                    self.reset_btn,
+                    minimum=_RESET_BUTTON_WIDTH,
+                    maximum=118,
+                ),
+            )
+        if hasattr(self, "apply_btn"):
+            self.ui.set_compact_footer_button_width(
+                self.apply_btn,
+                self.ui.compact_footer_button_width(
+                    self.apply_btn,
+                    minimum=_APPLY_BUTTON_WIDTH,
+                    maximum=112,
+                ),
+            )
+
+        self.widget.setMinimumWidth(0)
+        min_width = max(_MIN_DOCK_WIDTH, self.widget.minimumSizeHint().width())
+        self.widget.setMinimumWidth(min_width)
+        try:
+            if _DOCK is not None:
+                _DOCK.setMinimumWidth(min_width)
+                if (
+                    hasattr(_DOCK, "isFloating")
+                    and _DOCK.isFloating()
+                    and _DOCK.width() < min_width
+                ):
+                    _DOCK.resize(min_width, max(_DOCK.height(), _DEFAULT_DOCK_HEIGHT))
+        except Exception:
+            pass
 
     def _refresh_own_panel_font(self, font):
         _refresh_widget_tree_font(self.widget, font)
@@ -431,6 +511,7 @@ class UiScalePanel:
             self.widget.setStyleSheet(
                 self._base_panel_stylesheet + "\n" + _build_panel_font_override(font)
             )
+            self._refresh_compact_metrics()
 
 
 def start_plugin():
@@ -532,19 +613,39 @@ def _build_panel_font_override(font):
         point_size = float(font.pointSize())
     if point_size <= 0:
         point_size = 11.0
+    label_size = point_size
+    hint_size = max(7.0, point_size * 11.0 / 13.0)
+    button_size = max(7.0, point_size * 12.0 / 13.0)
     return f"""
 QWidget#RizumSurface,
 QWidget#RizumSurface *,
 QWidget#RizumCompactDockSurface,
 QWidget#RizumCompactDockSurface *,
-QLabel#RizumFieldLabel,
-QLabel#RizumHintLabel,
-QLabel#RizumMockText,
-QPushButton[variant="dialog-secondary"],
-QPushButton[variant="dialog-primary"],
 QMenu#RizumPopupMenu {{
     font-family: "{family}", Arial, sans-serif;
-    font-size: {point_size:.2f}pt;
+}}
+
+QLabel#RizumFieldLabel,
+QLabel#RizumMockText {{
+    font-family: "{family}", Arial, sans-serif;
+    font-size: {label_size:.2f}pt;
+}}
+
+QLabel#RizumHintLabel,
+QMenu#RizumPopupMenu,
+QPushButton[variant="dialog-secondary"],
+QPushButton[variant="dialog-primary"] {{
+    font-family: "{family}", Arial, sans-serif;
+}}
+
+QLabel#RizumHintLabel {{
+    font-size: {hint_size:.2f}pt;
+}}
+
+QMenu#RizumPopupMenu,
+QPushButton[variant="dialog-secondary"],
+QPushButton[variant="dialog-primary"] {{
+    font-size: {button_size:.2f}pt;
 }}
 """
 

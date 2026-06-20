@@ -37,3 +37,9 @@ Rizum Painter UI Font is a lightweight Adobe Substance 3D Painter Python plugin 
 ## Usage
 
 Use `Size` to adjust the interface font scale, choose a font with `Font`, then click `Apply`. Click `Reset` to restore Painter's original font. The `..` button opens the `fonts` folder, where you can add new `.ttf` or `.otf` font files, then click the refresh button to update the list.
+
+## Bundled Fonts
+
+This plugin includes MiSans in the `fonts` folder for a ready-to-use default font option. MiSans is provided by Xiaomi Inc. and remains subject to Xiaomi's MiSans Font Intellectual Property License Agreement.
+
+MiSans Global is free for commercial use, including embedded software, but software that embeds it should specifically state that it uses MiSans. Keep the bundled notice and license reference, and do not redistribute or sell MiSans font files as standalone font software. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the full project notice.
