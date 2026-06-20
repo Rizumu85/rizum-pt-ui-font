@@ -8,7 +8,9 @@
   "refresh": "Refresh",
   "no_hinting": "No hinting",
   "reset": "Reset",
-  "apply": "Apply",
+  "save": "Save",
+  "undo": "Undo changes",
+  "saved": "Saved",
   "loaded": "Rizum Painter UI Font plugin loaded",
   "unloaded": "Rizum Painter UI Font plugin unloaded"
 }

@@ -8,7 +8,9 @@
   "refresh": "更新",
   "no_hinting": "ヒンティングなし",
   "reset": "リセット",
-  "apply": "適用",
+  "save": "保存",
+  "undo": "変更を元に戻す",
+  "saved": "保存しました",
   "loaded": "Rizum Painter UI Font プラグインを読み込みました",
   "unloaded": "Rizum Painter UI Font プラグインを終了しました"
 }
