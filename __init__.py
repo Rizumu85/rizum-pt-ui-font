@@ -16,6 +16,8 @@ _PLUGIN_ROOT = Path(__file__).resolve().parent
 if str(_PLUGIN_ROOT) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_ROOT))
 
+from font_session import FontSession, FontState, QSettingsFontSettings, QtFontApplier
+
 try:
     from ui_kit_loader import load_ui_kit as _load_bundled_ui_kit
 except Exception:
@@ -23,7 +25,7 @@ except Exception:
 
 _PANEL = None
 _DOCK = None
-PLUGIN_VERSION = "0.4.1"
+PLUGIN_VERSION = "0.4.2"
 _MIN_DOCK_WIDTH = 250
 _DEFAULT_DOCK_WIDTH = _MIN_DOCK_WIDTH
 _DEFAULT_DOCK_HEIGHT = 184
@@ -129,7 +131,6 @@ def _load_ui_kit():
 def _load_prettier_ui():
     """Compatibility alias for older local smoke tests."""
     return _load_ui_kit()
-    return None
 
 
 class UiScalePanel:
@@ -143,16 +144,22 @@ class UiScalePanel:
         self.store = QtCore.QSettings("Rizum", "PainterUiFont")
         self.language = _resolve_language(_read_painter_log_language())
         self.original_font = QtWidgets.QApplication.font()
+        self.settings = QSettingsFontSettings(self.store)
+        self._saved_state = self.settings.load()
+        self.session = FontSession(
+            self.settings,
+            QtFontApplier(
+                QtGui,
+                QtWidgets,
+                self.original_font,
+                _refresh_widget_font,
+                self._refresh_own_panel_font,
+            ),
+        )
         self.font_dir = Path(__file__).resolve().parent / "fonts"
         self._loaded_families = {}
         self._base_panel_stylesheet = ""
         self._styled_rows = {}
-        # Live-preview history stack. Each live change (size/font/hinting) is
-        # recorded here; "undo" reverts to the previous live state. "save" is
-        # the only action that persists to QSettings; closing without saving
-        # discards unsaved live changes.
-        self._live_history = []
-        self._live_index = -1
 
         self.widget = QtWidgets.QWidget()
         self.widget.setWindowTitle(self._tr("panel_title"))
@@ -163,7 +170,7 @@ class UiScalePanel:
 
         self._populate_fonts()
         self._refresh_compact_metrics()
-        self._seed_history()
+        self._seed_session()
         self._connect_live_sync()
 
     def _build_prettier_layout(self):
@@ -188,7 +195,7 @@ class UiScalePanel:
         main_layout.setSpacing(10)
         label_width = self._label_width()
 
-        self.scale = self.ui.make_spin_input(float(self.store.value("scale", 1.0)))
+        self.scale = self.ui.make_spin_input(self._saved_state.scale)
         self._styled_rows["size"] = self.ui.make_field_row(
             self._tr("size"),
             self.scale,
@@ -233,7 +240,7 @@ class UiScalePanel:
         tool_row.addStretch(1)
 
         self.hinting_cb = self.ui.make_mock_checkbox()
-        self.hinting_cb.setChecked(_read_bool(self.store.value("hinting_off", True)))
+        self.hinting_cb.setChecked(self._saved_state.hinting)
         self.hint_widget = self.ui.make_inline_checkbox_row(
             self._tr("no_hinting"),
             self.hinting_cb,
@@ -322,7 +329,7 @@ class UiScalePanel:
         self.scale.setSingleStep(0.05)
         self.scale.setDecimals(2)
         self.scale.setMaximumWidth(80)
-        self.scale.setValue(float(self.store.value("scale", 1.0)))
+        self.scale.setValue(self._saved_state.scale)
         size_row.addWidget(self.scale)
         size_row.addStretch(1)
         layout.addLayout(size_row)
@@ -369,7 +376,7 @@ class UiScalePanel:
         layout.addLayout(actions_row)
 
         self.hinting_cb = QtWidgets.QCheckBox(self._tr("no_hinting"))
-        self.hinting_cb.setChecked(_read_bool(self.store.value("hinting_off", True)))
+        self.hinting_cb.setChecked(self._saved_state.hinting)
         layout.addWidget(self.hinting_cb)
 
         layout.addStretch(1)
@@ -422,7 +429,7 @@ class UiScalePanel:
                         self._loaded_families[family] = family
                         self.font_combo.addItem(family, family)
 
-        saved_family = self.store.value("font_family", "")
+        saved_family = self._saved_state.family
         if saved_family:
             idx = self.font_combo.findData(saved_family)
             if idx >= 0:
@@ -449,30 +456,21 @@ class UiScalePanel:
             hinting = self.hinting_cb.isChecked()
         except Exception:
             hinting = True
-        return {"scale": scale, "family": family, "hinting": hinting}
+        return FontState(scale=scale, family=family, hinting=hinting)
 
-    def _seed_history(self):
-        self._live_history = [self._current_state()]
-        self._live_index = 0
-        self._update_undo_enabled()
-
-    def _record_live_state(self):
-        state = self._current_state()
-        if self._live_history and state == self._live_history[self._live_index]:
-            return
-        self._live_history = self._live_history[: self._live_index + 1]
-        self._live_history.append(state)
-        self._live_index = len(self._live_history) - 1
+    def _seed_session(self):
+        self.session.seed(self._current_state())
         self._update_undo_enabled()
 
     def _update_undo_enabled(self):
         if hasattr(self, "undo_btn"):
             try:
-                self.undo_btn.setEnabled(self._live_index > 0)
+                self.undo_btn.setEnabled(self.session.can_undo)
             except Exception:
                 pass
 
     def _set_controls(self, state, block=True):
+        state = FontState.from_value(state)
         widgets = [self.scale, self.font_combo, self.hinting_cb]
         if block:
             for widget in widgets:
@@ -481,11 +479,11 @@ class UiScalePanel:
                 except Exception:
                     pass
         try:
-            self.scale.setValue(float(state.get("scale", 1.0)))
+            self.scale.setValue(state.scale)
         except Exception:
             pass
         try:
-            family = state.get("family", "") or ""
+            family = state.family
             idx = self.font_combo.findData(family) if family else 0
             if idx < 0:
                 idx = 0
@@ -493,7 +491,7 @@ class UiScalePanel:
         except Exception:
             pass
         try:
-            self.hinting_cb.setChecked(bool(state.get("hinting", True)))
+            self.hinting_cb.setChecked(state.hinting)
         except Exception:
             pass
         if block:
@@ -521,70 +519,29 @@ class UiScalePanel:
         except Exception:
             pass
 
-    def _build_font(self, scale, font_family, hinting_off):
-        font = self.QtGui.QFont(self.original_font)
-        base_size = self.original_font.pointSizeF()
-        if base_size <= 0:
-            base_size = float(self.original_font.pointSize())
-        if base_size > 0:
-            font.setPointSizeF(base_size * scale)
-        if font_family:
-            font.setFamily(font_family)
-        if hinting_off:
-            font.setHintingPreference(self.QtGui.QFont.PreferNoHinting)
-        return font
-
-    def _apply_font_object(self, font):
-        app = self.QtWidgets.QApplication.instance()
-        if app is None:
-            return
-        app.setFont(font)
-        for widget in app.allWidgets():
-            _refresh_widget_font(widget, font)
-        self._refresh_own_panel_font(font)
-
     def _apply_font(self):
         """Apply the current control values to the live UI without persisting."""
-        state = self._current_state()
-        font = self._build_font(state["scale"], state["family"], state["hinting"])
-        self._apply_font_object(font)
-        self._record_live_state()
+        self.session.preview(self._current_state())
+        self._update_undo_enabled()
 
     def _undo_live(self):
         """Revert the UI to the previous live-preview state (not saved state)."""
-        if self._live_index <= 0:
+        state = self.session.undo(before_apply=self._set_controls)
+        if state is None:
             return
-        self._live_index -= 1
-        state = self._live_history[self._live_index]
-        self._set_controls(state)
-        font = self._build_font(state["scale"], state["family"], state["hinting"])
-        self._apply_font_object(font)
         self._update_undo_enabled()
 
     def _revert_to_saved(self):
         """Discard unsaved live preview, restore to last saved state."""
-        saved_scale = float(self.store.value("scale", 1.0))
-        saved_family = self.store.value("font_family", "") or ""
-        saved_hinting = _read_bool(self.store.value("hinting_off", True))
-        self._set_controls(
-            {"scale": saved_scale, "family": saved_family, "hinting": saved_hinting}
-        )
-        if saved_scale != 1.0 or saved_family or not saved_hinting:
-            font = self._build_font(saved_scale, saved_family, saved_hinting)
-        else:
-            font = self.original_font
-        self._apply_font_object(font)
-        self._seed_history()
+        self._saved_state = self.session.saved_state()
+        self._set_controls(self._saved_state)
+        self.session.revert_to(self._current_state())
+        self._update_undo_enabled()
 
     def save(self):
         """Persist the current live state to QSettings."""
-        self._apply_font()
-        scale = float(self.scale.value())
-        font_family = self.font_combo.currentData() or ""
-        self.store.setValue("scale", scale)
-        self.store.setValue("font_family", font_family)
-        self.store.setValue("hinting_off", self.hinting_cb.isChecked())
-        self.store.sync()
+        self._saved_state = self.session.save(self._current_state())
+        self._update_undo_enabled()
         self._show_save_feedback()
 
     def _show_save_feedback(self):
@@ -623,23 +580,16 @@ class UiScalePanel:
             QtCore.QTimer.singleShot(1400, label.hide)
 
     def reset(self):
-        app = self.QtWidgets.QApplication.instance()
-        if app is None:
-            return
-
-        self._set_controls({"scale": 1.0, "family": "", "hinting": True})
-        self._apply_font_object(self.original_font)
-
-        self._seed_history()
-
-        self.store.setValue("scale", 1.0)
-        self.store.setValue("font_family", "")
-        self.store.setValue("hinting_off", True)
-        self.store.sync()
+        self._saved_state = self.session.reset(before_apply=self._set_controls)
+        self._update_undo_enabled()
 
     def close(self):
-        self._restore_original_font()
+        self.session.restore_original()
         self._styled_rows.clear()
+
+    def apply_saved_if_needed(self):
+        if self.session.saved_needs_apply():
+            self._apply_font()
 
     def _tr(self, key):
         return _TEXT.get(self.language, _TEXT[_DEFAULT_LANGUAGE]).get(
@@ -879,22 +829,6 @@ class UiScalePanel:
             )
             self._refresh_compact_metrics()
 
-    def _restore_original_font(self):
-        app = self.QtWidgets.QApplication.instance()
-        if app is None:
-            return
-        try:
-            app.setFont(self.original_font)
-        except Exception:
-            pass
-        try:
-            widgets = app.allWidgets()
-        except Exception:
-            widgets = []
-        for widget in widgets:
-            _refresh_widget_font(widget, self.original_font)
-
-
 def start_plugin():
     import substance_painter as sp
 
@@ -907,11 +841,7 @@ def start_plugin():
     _DOCK.show()
     _resize_floating_dock()
 
-    saved_scale = float(_PANEL.store.value("scale", 1.0))
-    saved_family = _PANEL.store.value("font_family", "")
-    saved_hinting = _read_bool(_PANEL.store.value("hinting_off", True))
-    if saved_scale != 1.0 or saved_family or not saved_hinting:
-        _PANEL._apply_font()
+    _PANEL.apply_saved_if_needed()
 
     sp.logging.info(_PANEL._tr("loaded"))
 
@@ -1109,11 +1039,3 @@ def _fallback_icon_button(QtCore, QtGui, QtWidgets, icon_name, text, tooltip):
         button.setFixedSize(64 if len(text) > 2 else 24, 20)
     button.setToolTip(tooltip)
     return button
-
-
-def _read_bool(value):
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return False
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}

@@ -10,7 +10,9 @@ from pathlib import Path
 
 REQUIRED_PATHS = (
     ".gitignore",
+    "CONTEXT.md",
     "distribution.py",
+    "font_session.py",
     "README.md",
     "THIRD_PARTY_NOTICES.md",
     "__init__.py",

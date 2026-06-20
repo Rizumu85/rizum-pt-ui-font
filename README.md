@@ -32,6 +32,7 @@ Rizum Painter UI Font is a lightweight Adobe Substance 3D Painter Python plugin 
    python/plugins/rizum-pt-ui-font/
      __init__.py
      distribution.py
+     font_session.py
      ui_kit_loader.py
      plugin.json
      fonts/
@@ -99,6 +100,7 @@ Rizum Painter UI Font 是一个轻量的 Adobe Substance 3D Painter Python 插�
    python/plugins/rizum-pt-ui-font/
      __init__.py
      distribution.py
+     font_session.py
      ui_kit_loader.py
      plugin.json
      fonts/
