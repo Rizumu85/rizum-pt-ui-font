@@ -26,6 +26,8 @@ except Exception:
 
 _PANEL = None
 _DOCK = None
+_STARTUP_VISIBILITY_SETTLING = False
+_PANEL_VISIBLE_SETTING = "panel_visible"
 PLUGIN_VERSION = "0.4.3"
 _MIN_DOCK_WIDTH = 250
 _DEFAULT_DOCK_WIDTH = _MIN_DOCK_WIDTH
@@ -77,6 +79,14 @@ def _load_translations():
 
 def _normalize_language(language):
     return str(language or "").strip().lower().replace("-", "_")
+
+
+def _setting_bool(value, default=False):
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return bool(default)
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _resolve_language(*candidates):
@@ -569,6 +579,16 @@ class UiScalePanel:
         self.session.restore_original()
         self._styled_rows.clear()
 
+    def panel_should_start_visible(self):
+        return _setting_bool(
+            self.store.value(_PANEL_VISIBLE_SETTING, True),
+            True,
+        )
+
+    def save_panel_visibility(self, visible):
+        self.store.setValue(_PANEL_VISIBLE_SETTING, bool(visible))
+        self.store.sync()
+
     def apply_saved_if_needed(self):
         if self.session.saved_needs_apply():
             self._apply_font()
@@ -814,14 +834,24 @@ class UiScalePanel:
 def start_plugin():
     import substance_painter as sp
 
-    global _DOCK, _PANEL
+    global _DOCK, _PANEL, _STARTUP_VISIBILITY_SETTLING
     _PANEL = UiScalePanel()
+    start_visible = _PANEL.panel_should_start_visible()
+    _STARTUP_VISIBILITY_SETTLING = not start_visible
     _DOCK = sp.ui.add_dock_widget(_PANEL.widget)
     _DOCK.setWindowTitle(_PANEL._tr("panel_title"))
     _connect_floating_resize()
     _connect_dock_visibility()
-    _DOCK.show()
-    _resize_floating_dock()
+    if start_visible:
+        _DOCK.show()
+        _resize_floating_dock()
+    else:
+        _DOCK.hide()
+        for delay in (0, 1000, 4000, 8000):
+            _PANEL.QtCore.QTimer.singleShot(
+                delay,
+                lambda final=delay == 8000: _enforce_startup_hidden(final),
+            )
 
     _PANEL.apply_saved_if_needed()
 
@@ -831,8 +861,9 @@ def start_plugin():
 def close_plugin():
     import substance_painter as sp
 
-    global _DOCK, _PANEL
+    global _DOCK, _PANEL, _STARTUP_VISIBILITY_SETTLING
     language = _PANEL.language if _PANEL is not None else _DEFAULT_LANGUAGE
+    _STARTUP_VISIBILITY_SETTLING = False
     if _PANEL is not None:
         _PANEL.close()
         _PANEL = None
@@ -853,15 +884,48 @@ def _connect_dock_visibility():
     """Revert unsaved live preview when the panel is closed (hidden)."""
     try:
         _DOCK.visibilityChanged.connect(_on_dock_visibility_changed)
+        _DOCK.toggleViewAction().toggled.connect(_on_dock_toggle_requested)
     except Exception:
         pass
 
 
+def _enforce_startup_hidden(final=False):
+    global _STARTUP_VISIBILITY_SETTLING
+    if not _STARTUP_VISIBILITY_SETTLING:
+        return
+    if _PANEL is None or _DOCK is None or not _is_qt_object_alive(_PANEL.widget):
+        _STARTUP_VISIBILITY_SETTLING = False
+        return
+    _DOCK.hide()
+    if final:
+        _STARTUP_VISIBILITY_SETTLING = False
+
+
 def _on_dock_visibility_changed(visible):
-    if visible:
+    if _PANEL is None or not _is_qt_object_alive(_PANEL.widget):
+        return
+
+    if not _STARTUP_VISIBILITY_SETTLING:
+        try:
+            user_changed_visibility = (
+                visible
+                or _DOCK.isFloating()
+                or not _DOCK.toggleViewAction().isChecked()
+            )
+        except Exception:
+            user_changed_visibility = True
+        if user_changed_visibility:
+            _PANEL.save_panel_visibility(visible)
+
+    if not visible:
+        _PANEL._revert_to_saved()
+
+
+def _on_dock_toggle_requested(visible):
+    if _STARTUP_VISIBILITY_SETTLING:
         return
     if _PANEL is not None and _is_qt_object_alive(_PANEL.widget):
-        _PANEL._revert_to_saved()
+        _PANEL.save_panel_visibility(visible)
 
 
 def _effective_dock_width():
