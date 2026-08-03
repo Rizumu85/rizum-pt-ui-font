@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+_UI_SCALE_PROPERTY = "rizumUiFontScale"
+
 
 @dataclass(frozen=True)
 class FontState:
@@ -48,7 +50,7 @@ class QSettingsFontSettings:
 
 
 class QtFontApplier:
-    """Qt Adapter that builds and applies a FontState to QApplication."""
+    """Build and apply a font state to Painter's Qt application."""
 
     def __init__(self, QtGui, QtWidgets, original_font, refresh_widget, refresh_panel):
         self.QtGui = QtGui
@@ -65,6 +67,10 @@ class QtFontApplier:
             base_size = float(self.original_font.pointSize())
         if base_size > 0:
             font.setPointSizeF(base_size * state.scale)
+        else:
+            pixel_size = self.original_font.pixelSize()
+            if pixel_size > 0:
+                font.setPixelSize(max(1, int(round(pixel_size * state.scale))))
         if state.family:
             font.setFamily(state.family)
         if state.hinting:
@@ -72,20 +78,29 @@ class QtFontApplier:
         return font
 
     def apply_state(self, state):
-        return self.apply_font(self.build_font(state))
+        state = FontState.from_value(state)
+        return self.apply_font(self.build_font(state), state.scale)
 
     def restore_original(self):
-        return self.apply_font(self.original_font)
+        return self.apply_font(self.original_font, 1.0)
 
-    def apply_font(self, font):
+    def apply_font(self, font, scale):
         app = self.QtWidgets.QApplication.instance()
         if app is None:
             return False
+        _set_application_scale(app, scale)
         app.setFont(font)
         for widget in app.allWidgets():
             self.refresh_widget(widget, font)
         self.refresh_panel(font)
         return True
+
+
+def _set_application_scale(app, scale):
+    try:
+        app.setProperty(_UI_SCALE_PROPERTY, float(scale))
+    except Exception:
+        pass
 
 
 class FontSession:
