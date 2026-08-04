@@ -26,7 +26,12 @@ except Exception:
 
 _PANEL = None
 _DOCK = None
+_GUI_READY_CONNECTED = False
+_STARTUP_SURFACE_READY = False
+_STARTUP_SURFACE_PREPARING = False
 _STARTUP_VISIBILITY_SETTLING = False
+_STARTUP_PANEL_VISIBLE = True
+_GUI_READY_PROPERTY = "rizumUiFontGuiReady"
 _PANEL_VISIBLE_SETTING = "panel_visible"
 PLUGIN_VERSION = "0.4.3"
 _MIN_DOCK_WIDTH = 250
@@ -235,9 +240,11 @@ class UiScalePanel:
         icon_group.setContentsMargins(0, 0, 0, 0)
         icon_group.setSpacing(2)
         self.browse_btn = self.ui.make_icon_button("folder.svg", self._tr("open_fonts_folder"))
+        self._install_compact_tooltip(self.browse_btn, self._tr("open_fonts_folder"))
         self.browse_btn.setProperty("accent", True)
         self.browse_btn.clicked.connect(self._open_fonts_dir)
         self.refresh_btn = self.ui.make_icon_button("refresh.svg", self._tr("refresh_font_list"))
+        self._install_compact_tooltip(self.refresh_btn, self._tr("refresh_font_list"))
         self.refresh_btn.setProperty("accent", True)
         self.refresh_btn.clicked.connect(self._populate_fonts)
         icon_group.addWidget(self.browse_btn)
@@ -286,6 +293,7 @@ class UiScalePanel:
         self._save_feedback.hide()
         footer_layout.addWidget(self._save_feedback)
         self.undo_btn = self.ui.make_icon_button("undo.svg", self._tr("undo"))
+        self._install_compact_tooltip(self.undo_btn, self._tr("undo"))
         self.undo_btn.setProperty("accent", True)
         self.undo_btn.clicked.connect(self._undo_live)
         footer_layout.addWidget(self.undo_btn)
@@ -317,6 +325,19 @@ class UiScalePanel:
         self.widget.setMinimumWidth(max(_MIN_DOCK_WIDTH, self.widget.minimumSizeHint().width()))
         self.widget.setMinimumHeight(self.widget.minimumSizeHint().height())
         self._base_panel_stylesheet = self.widget.styleSheet()
+
+    def _install_compact_tooltip(self, widget, text):
+        """Force the compact tooltip seam, even if a button set a native tooltip."""
+        try:
+            widget.setToolTip("")
+        except Exception:
+            pass
+        try:
+            installer = getattr(self.ui, "install_compact_tooltip", None)
+            if installer is not None:
+                installer(widget, text)
+        except Exception:
+            pass
 
     def _build_fallback_layout(self):
         QtWidgets = self.QtWidgets
@@ -724,6 +745,11 @@ class UiScalePanel:
                 btn.setPaintedIconSize(icon_px)
             except Exception:
                 pass
+            try:
+                if hasattr(btn, "setCompactTooltipScale"):
+                    btn.setCompactTooltipScale(scale)
+            except Exception:
+                pass
         # Hint checkbox row margins scale with the font. Small right offset
         # aligns the checkbox with the combo's chevron.
         try:
@@ -834,26 +860,32 @@ class UiScalePanel:
 def start_plugin():
     import substance_painter as sp
 
-    global _DOCK, _PANEL, _STARTUP_VISIBILITY_SETTLING
+    global _DOCK, _PANEL, _STARTUP_SURFACE_READY, _STARTUP_SURFACE_PREPARING
+    global _STARTUP_VISIBILITY_SETTLING, _STARTUP_PANEL_VISIBLE
+    _STARTUP_SURFACE_READY = False
+    _STARTUP_SURFACE_PREPARING = False
     _PANEL = UiScalePanel()
-    start_visible = _PANEL.panel_should_start_visible()
-    _STARTUP_VISIBILITY_SETTLING = not start_visible
+    _STARTUP_PANEL_VISIBLE = _PANEL.panel_should_start_visible()
+    _STARTUP_VISIBILITY_SETTLING = not _STARTUP_PANEL_VISIBLE
+    _PANEL.widget.setUpdatesEnabled(False)
     _DOCK = sp.ui.add_dock_widget(_PANEL.widget)
+    _DOCK.hide()
     _DOCK.setWindowTitle(_PANEL._tr("panel_title"))
     _connect_floating_resize()
     _connect_dock_visibility()
-    if start_visible:
-        _DOCK.show()
-        _resize_floating_dock()
+    if _gui_ready_marked():
+        _finalize_startup_surface()
     else:
-        _DOCK.hide()
+        _connect_gui_ready_refresh()
+        # Handles enabling the plugin after Painter's one-shot GUI-ready event
+        # has already fired. During cold startup the event wins this race.
+        _PANEL.QtCore.QTimer.singleShot(5000, _finalize_startup_surface)
+    if _STARTUP_VISIBILITY_SETTLING:
         for delay in (0, 1000, 4000, 8000):
             _PANEL.QtCore.QTimer.singleShot(
                 delay,
                 lambda final=delay == 8000: _enforce_startup_hidden(final),
             )
-
-    _PANEL.apply_saved_if_needed()
 
     sp.logging.info(_PANEL._tr("loaded"))
 
@@ -861,18 +893,22 @@ def start_plugin():
 def close_plugin():
     import substance_painter as sp
 
-    global _DOCK, _PANEL, _STARTUP_VISIBILITY_SETTLING
+    global _DOCK, _PANEL, _STARTUP_SURFACE_READY, _STARTUP_SURFACE_PREPARING
+    global _STARTUP_VISIBILITY_SETTLING
     language = _PANEL.language if _PANEL is not None else _DEFAULT_LANGUAGE
+    _STARTUP_SURFACE_READY = False
+    _STARTUP_SURFACE_PREPARING = False
     _STARTUP_VISIBILITY_SETTLING = False
+    _disconnect_gui_ready_refresh()
     if _PANEL is not None:
         _PANEL.close()
         _PANEL = None
     if _DOCK is not None:
         sp.ui.delete_ui_element(_DOCK)
         _DOCK = None
+    _STARTUP_SURFACE_READY = False
+    _STARTUP_SURFACE_PREPARING = False
     sp.logging.info(_TEXT.get(language, _TEXT[_DEFAULT_LANGUAGE])["unloaded"])
-
-
 def _connect_floating_resize():
     try:
         _DOCK.topLevelChanged.connect(lambda floating: _resize_floating_dock() if floating else None)
@@ -889,6 +925,137 @@ def _connect_dock_visibility():
         pass
 
 
+def _connect_gui_ready_refresh():
+    """Reapply saved metrics after Painter finishes constructing its GUI."""
+    import substance_painter as sp
+
+    global _GUI_READY_CONNECTED
+    if _GUI_READY_CONNECTED:
+        return
+    sp.event.DISPATCHER.connect_strong(
+        sp.event.GraphicalUserInterfaceStarted,
+        _on_gui_ready,
+    )
+    _GUI_READY_CONNECTED = True
+
+
+def _disconnect_gui_ready_refresh():
+    import substance_painter as sp
+
+    global _GUI_READY_CONNECTED
+    if not _GUI_READY_CONNECTED:
+        return
+    try:
+        sp.event.DISPATCHER.disconnect(
+            sp.event.GraphicalUserInterfaceStarted,
+            _on_gui_ready,
+        )
+    except (KeyError, RuntimeError, ValueError):
+        pass
+    _GUI_READY_CONNECTED = False
+
+
+def _on_gui_ready(_event):
+    _mark_gui_ready()
+    if _PANEL is None or not _is_qt_object_alive(_PANEL.widget):
+        _disconnect_gui_ready_refresh()
+        return
+    # Run after the remaining GUI-started callbacks so Painter's final host
+    # font and stylesheet cannot overwrite the restored component metrics.
+    _PANEL.QtCore.QTimer.singleShot(0, _finalize_startup_surface)
+    _disconnect_gui_ready_refresh()
+
+
+def _gui_ready_marked():
+    if _PANEL is None:
+        return False
+    try:
+        app = _PANEL.QtWidgets.QApplication.instance()
+        return app is not None and bool(app.property(_GUI_READY_PROPERTY))
+    except Exception:
+        return False
+
+
+def _mark_gui_ready():
+    if _PANEL is None:
+        return
+    try:
+        app = _PANEL.QtWidgets.QApplication.instance()
+        if app is not None:
+            app.setProperty(_GUI_READY_PROPERTY, True)
+    except Exception:
+        pass
+
+
+def _finalize_startup_surface():
+    """Lay out the floating dock off-screen before its first visible frame."""
+    global _STARTUP_SURFACE_READY, _STARTUP_SURFACE_PREPARING
+    if _STARTUP_SURFACE_READY or _STARTUP_SURFACE_PREPARING:
+        return
+    if _PANEL is None or _DOCK is None or not _is_qt_object_alive(_PANEL.widget):
+        return
+
+    _STARTUP_SURFACE_PREPARING = True
+    try:
+        _mark_gui_ready()
+        _apply_saved_layout()
+        if not _STARTUP_PANEL_VISIBLE:
+            _PANEL.widget.setUpdatesEnabled(True)
+            _STARTUP_SURFACE_READY = True
+            _STARTUP_SURFACE_PREPARING = False
+            _disconnect_gui_ready_refresh()
+            return
+        _DOCK.setWindowOpacity(0.0)
+        _DOCK.show()
+        _sync_startup_layout()
+        _PANEL.QtCore.QTimer.singleShot(0, _stabilize_startup_surface)
+    except Exception:
+        _STARTUP_SURFACE_PREPARING = False
+        _PANEL.widget.setUpdatesEnabled(True)
+        _DOCK.setWindowOpacity(1.0)
+        raise
+
+
+def _stabilize_startup_surface():
+    if not _startup_surface_is_alive():
+        return
+    _sync_startup_layout()
+    # QDockWidget restores floating geometry asynchronously after show().
+    # Keep the transparent window alive through that host-side resize pass.
+    _PANEL.QtCore.QTimer.singleShot(300, _prepare_startup_reveal)
+
+
+def _prepare_startup_reveal():
+    if not _startup_surface_is_alive():
+        return
+    _sync_startup_layout()
+    _PANEL.widget.setUpdatesEnabled(True)
+    _PANEL.widget.repaint()
+    _DOCK.update()
+    # Give the hidden top-level backing store time to paint the children.
+    # Revealing on the next event-loop turn can expose one blank dock frame.
+    _PANEL.QtCore.QTimer.singleShot(100, _commit_startup_reveal)
+
+
+def _commit_startup_reveal():
+    global _STARTUP_SURFACE_READY, _STARTUP_SURFACE_PREPARING
+    if not _startup_surface_is_alive():
+        return
+    _DOCK.setWindowOpacity(1.0)
+    _STARTUP_SURFACE_READY = True
+    _STARTUP_SURFACE_PREPARING = False
+    _disconnect_gui_ready_refresh()
+
+
+def _startup_surface_is_alive():
+    return (
+        _STARTUP_SURFACE_PREPARING
+        and _PANEL is not None
+        and _DOCK is not None
+        and _is_qt_object_alive(_PANEL.widget)
+    )
+
+
 def _enforce_startup_hidden(final=False):
     global _STARTUP_VISIBILITY_SETTLING
     if not _STARTUP_VISIBILITY_SETTLING:
@@ -897,15 +1064,35 @@ def _enforce_startup_hidden(final=False):
         _STARTUP_VISIBILITY_SETTLING = False
         return
     _DOCK.hide()
+    _PANEL.widget.setUpdatesEnabled(True)
     if final:
         _STARTUP_VISIBILITY_SETTLING = False
+
+
+def _apply_saved_layout():
+    if _PANEL is None or not _is_qt_object_alive(_PANEL.widget):
+        return
+    _PANEL.apply_saved_if_needed()
+    _sync_startup_layout()
+
+
+def _sync_startup_layout():
+    """Re-measure the dock after its saved font and floating state settle."""
+    if _PANEL is None or not _is_qt_object_alive(_PANEL.widget):
+        return
+    _PANEL._refresh_compact_metrics()
+    _resize_floating_dock()
 
 
 def _on_dock_visibility_changed(visible):
     if _PANEL is None or not _is_qt_object_alive(_PANEL.widget):
         return
 
-    if not _STARTUP_VISIBILITY_SETTLING:
+    if (
+        _STARTUP_SURFACE_READY
+        and not _STARTUP_SURFACE_PREPARING
+        and not _STARTUP_VISIBILITY_SETTLING
+    ):
         try:
             user_changed_visibility = (
                 visible
@@ -920,9 +1107,12 @@ def _on_dock_visibility_changed(visible):
     if not visible:
         _PANEL._revert_to_saved()
 
-
 def _on_dock_toggle_requested(visible):
-    if _STARTUP_VISIBILITY_SETTLING:
+    if (
+        not _STARTUP_SURFACE_READY
+        or _STARTUP_SURFACE_PREPARING
+        or _STARTUP_VISIBILITY_SETTLING
+    ):
         return
     if _PANEL is not None and _is_qt_object_alive(_PANEL.widget):
         _PANEL.save_panel_visibility(visible)

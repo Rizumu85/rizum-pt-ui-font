@@ -23,6 +23,7 @@ REQUIRED_UI_KIT_FEATURES = (
     "make_compact_dock_layout",
     "make_field_row",
     "make_icon_button",
+    "install_compact_tooltip",
     "make_inline_checkbox_row",
     "make_mock_checkbox",
     "make_spin_input",
@@ -48,6 +49,7 @@ def load_ui_kit(plugin_root, env=None):
             continue
         _prefer_root(candidate.root)
         _clear_loaded_ui_kit()
+        importlib.invalidate_caches()
         try:
             module = importlib.import_module(UI_KIT_MODULE)
         except Exception:
