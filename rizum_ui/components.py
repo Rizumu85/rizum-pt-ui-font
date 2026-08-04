@@ -17,6 +17,513 @@ COMPACT_DOCK_CARD_BG = "#1b1b1b"
 COMPACT_DOCK_CARD_RADIUS = 10
 FOOTER_BUTTON_HEIGHT = 26
 FOOTER_BUTTON_PADDING_X = 8
+PAINTER_FOOTER_MARGIN_X = 16
+PAINTER_FOOTER_MARGIN_BOTTOM = 14
+PAINTER_TITLE_BAR_HEIGHT = 32
+PAINTER_WINDOW_CONTENT_RADIUS = 10
+PAINTER_WINDOW_CONTENT_BOTTOM_RADIUS = 8
+
+
+def make_segmented_control(options=None, current=None, parent=None):
+    """Create a compact animated single-choice control."""
+    from PySide6 import QtCore, QtGui, QtWidgets
+
+    from .theme import default_theme
+
+    base_height = 30
+    minimum_height = 23
+
+    class _SegmentedControl(QtWidgets.QFrame):
+        currentIndexChanged = QtCore.Signal(int)
+        currentDataChanged = QtCore.Signal(object)
+
+        def __init__(self):
+            super().__init__(parent)
+            self.setObjectName("RizumSegmentedControl")
+            self.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+            self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
+            self.setMouseTracking(True)
+            self.setAutoFillBackground(False)
+            # Painter styles every QFrame; suppress that fill so the painted
+            # end-cap gutter reveals the real parent surface instead.
+            self.setStyleSheet(
+                "QFrame#RizumSegmentedControl { background: transparent; border: 0; }"
+            )
+            self.setSizePolicy(
+                QtWidgets.QSizePolicy.Policy.Minimum,
+                QtWidgets.QSizePolicy.Policy.Fixed,
+            )
+            self._items = []
+            self._current_index = -1
+            self._hovered_index = -1
+            self._compact_height = base_height
+            self._slider_x = 2.0
+            self._slider_width = 0.0
+            self._animation = None
+            self._corner_radius = None
+            self._paint_inset = None
+            self._theme = {}
+            self.setTheme({})
+            self.setFixedHeight(base_height)
+            self.setItems(options or [])
+            if current is not None:
+                self.setCurrentData(current, emit=False)
+
+        def setTheme(self, theme):
+            theme = theme or {}
+
+            def color(keys, fallback):
+                for key in keys:
+                    if key in theme:
+                        value = theme[key]
+                        break
+                else:
+                    value = fallback
+                if isinstance(value, QtGui.QColor):
+                    return QtGui.QColor(value)
+                text = str(value).strip()
+                if text.startswith("rgba(") and text.endswith(")"):
+                    parts = [part.strip() for part in text[5:-1].split(",")]
+                    if len(parts) == 4:
+                        red, green, blue = (int(float(part)) for part in parts[:3])
+                        alpha_value = float(parts[3])
+                        alpha = (
+                            round(alpha_value * 255)
+                            if alpha_value <= 1
+                            else round(alpha_value)
+                        )
+                        return QtGui.QColor(
+                            red,
+                            green,
+                            blue,
+                            max(0, min(255, alpha)),
+                        )
+                return QtGui.QColor(text)
+
+            shadow = theme.get("segment_slider_shadow")
+            self._theme = {
+                "track": color(
+                    ("segment_bg", "secondary"),
+                    default_theme.surface_control,
+                ),
+                "slider": color(("segment_slider_bg",), default_theme.accent),
+                "active_text": color(
+                    ("segment_active_text",),
+                    default_theme.accent_text,
+                ),
+                "muted": color(
+                    ("muted", "text_secondary"),
+                    default_theme.text_muted,
+                ),
+                "hover": color(("hover",), default_theme.surface_hover),
+                "shadow": None if shadow is None else QtGui.QColor(shadow),
+                "slider_border": (
+                    None
+                    if theme.get("segment_slider_border") is None
+                    else color(("segment_slider_border",), default_theme.border)
+                ),
+            }
+            self.update()
+
+        def setCornerRadius(self, radius):
+            """Override the painted track radius while retaining scale support."""
+            self._corner_radius = max(0.0, float(radius))
+            self.update()
+
+        def setPaintInset(self, inset):
+            """Keep antialiased end caps clear of the widget paint boundary."""
+            self._paint_inset = max(0.5, float(inset))
+            self.update()
+
+        def getSliderX(self):
+            return self._slider_x
+
+        def setSliderX(self, value):
+            self._slider_x = float(value)
+            self.update()
+
+        def getSliderWidth(self):
+            return self._slider_width
+
+        def setSliderWidth(self, value):
+            self._slider_width = float(value)
+            self.update()
+
+        sliderX = QtCore.Property(float, getSliderX, setSliderX)
+        sliderWidth = QtCore.Property(float, getSliderWidth, setSliderWidth)
+
+        def _scale(self):
+            return self._compact_height / float(base_height)
+
+        def _scaled(self, value, floor=None):
+            scaled_value = int(round(value * self._scale()))
+            if floor is None:
+                floor = int(value * 0.75 + 0.5)
+            return max(floor, scaled_value)
+
+        def _device_geometry(self):
+            dpr = max(1.0, float(self.devicePixelRatioF()))
+            window = self.window()
+            origin = (
+                self.mapTo(window, QtCore.QPoint(0, 0))
+                if window is not None
+                else QtCore.QPoint(0, 0)
+            )
+
+            def aligned_axis(offset, extent):
+                start = int(float(offset) * dpr + 0.5)
+                end = int(float(offset + extent) * dpr + 0.5)
+                return start / dpr - offset, end / dpr - offset
+
+            left, right = aligned_axis(origin.x(), self.width())
+            top, bottom = aligned_axis(origin.y(), self.height())
+            return dpr, QtCore.QRectF(left, top, right - left, bottom - top)
+
+        @staticmethod
+        def _device_aligned_inset(value, dpr):
+            return max(1, int(float(value) * dpr + 0.5)) / dpr
+
+        def _font(self):
+            font = QtGui.QFont(self.font())
+            font.setWeight(QtGui.QFont.Weight.Medium)
+            return font
+
+        def _base_widths(self):
+            metrics = QtGui.QFontMetrics(self._font())
+            padding = self._scaled(12, 9)
+            minimum = self._scaled(34, 26)
+            return [
+                max(minimum, metrics.horizontalAdvance(label) + padding * 2)
+                for label, _data in self._items
+            ]
+
+        def _segment_rects(self):
+            if not self._items:
+                return []
+            dpr, paint_rect = self._device_geometry()
+            inset = self._device_aligned_inset(self._scaled(2, 2), dpr)
+            widths = [float(width) for width in self._base_widths()]
+            available = max(0.0, paint_rect.width() - inset * 2.0)
+            extra = max(0.0, available - sum(widths)) / len(widths)
+            rects = []
+            x = paint_rect.left() + inset
+            for index, width in enumerate(widths):
+                segment_width = width + extra
+                if index == len(widths) - 1:
+                    segment_width = max(0.0, paint_rect.right() - inset - x)
+                rects.append(
+                    QtCore.QRectF(
+                        x,
+                        paint_rect.top() + inset,
+                        segment_width,
+                        max(0.0, paint_rect.height() - inset * 2.0),
+                    )
+                )
+                x += segment_width
+            return rects
+
+        def _target_slider_rect(self):
+            rects = self._segment_rects()
+            if 0 <= self._current_index < len(rects):
+                return rects[self._current_index]
+            return QtCore.QRectF()
+
+        def _stop_animation(self):
+            if self._animation is not None:
+                self._animation.stop()
+                self._animation = None
+
+        def _sync_slider(self):
+            self._stop_animation()
+            target = self._target_slider_rect()
+            self._slider_x = target.x()
+            self._slider_width = target.width()
+            self.update()
+
+        def _animate_slider(self):
+            target = self._target_slider_rect()
+            self._stop_animation()
+            group = QtCore.QParallelAnimationGroup(self)
+            easing = (
+                QtCore.QEasingCurve.Type.OutCubic
+                if self._current_index in (0, len(self._items) - 1)
+                else QtCore.QEasingCurve.Type.OutBack
+            )
+            for prop, start, end in (
+                (b"sliderX", self._slider_x, target.x()),
+                (b"sliderWidth", self._slider_width, target.width()),
+            ):
+                animation = QtCore.QPropertyAnimation(self, prop, group)
+                animation.setDuration(220)
+                animation.setStartValue(start)
+                animation.setEndValue(end)
+                animation.setEasingCurve(easing)
+                group.addAnimation(animation)
+            self._animation = group
+            group.start()
+
+        def setItems(self, next_options):
+            previous_data = self.currentData()
+            items = []
+            for option in next_options or []:
+                if isinstance(option, (tuple, list)) and len(option) >= 2:
+                    label, data = option[0], option[1]
+                else:
+                    label = data = option
+                items.append((str(label), data))
+            self._items = items
+            self._current_index = self.findData(previous_data)
+            if self._current_index < 0 and self._items:
+                self._current_index = 0
+            self.setAccessibleName(" / ".join(label for label, _ in items))
+            self.refreshMetrics()
+
+        def count(self):
+            return len(self._items)
+
+        def findData(self, data):
+            for index, (_label, item_data) in enumerate(self._items):
+                if item_data == data:
+                    return index
+            return -1
+
+        def currentIndex(self):
+            return self._current_index
+
+        def currentData(self):
+            if 0 <= self._current_index < len(self._items):
+                return self._items[self._current_index][1]
+            return None
+
+        def currentText(self):
+            if 0 <= self._current_index < len(self._items):
+                return self._items[self._current_index][0]
+            return ""
+
+        def setCurrentIndex(
+            self,
+            index,
+            *,
+            animate=False,
+            emit=True,
+        ):
+            if not self._items:
+                index = -1
+            else:
+                index = max(0, min(int(index), len(self._items) - 1))
+            if index == self._current_index:
+                self._sync_slider()
+                return
+            self._current_index = index
+            if animate and self.isVisible():
+                self._animate_slider()
+            else:
+                self._sync_slider()
+            if emit:
+                self.currentIndexChanged.emit(index)
+                self.currentDataChanged.emit(self.currentData())
+
+        def setCurrentData(self, data, *, animate=False, emit=True):
+            index = self.findData(data)
+            if index >= 0:
+                self.setCurrentIndex(
+                    index,
+                    animate=animate,
+                    emit=emit,
+                )
+
+        def setCompactHeight(self, height):
+            """Scale the fixed frame and all painted internal geometry."""
+            self._compact_height = max(minimum_height, int(round(height)))
+            self.setFixedHeight(self._compact_height)
+            self.refreshMetrics()
+
+        def refreshMetrics(self):
+            self.setMinimumWidth(self.sizeHint().width())
+            self.updateGeometry()
+            self._sync_slider()
+
+        def sizeHint(self):
+            inset = self._scaled(2, 2)
+            return QtCore.QSize(
+                sum(self._base_widths()) + inset * 2,
+                self._compact_height,
+            )
+
+        def minimumSizeHint(self):
+            return self.sizeHint()
+
+        def _index_at(self, point):
+            for index, rect in enumerate(self._segment_rects()):
+                if rect.contains(point):
+                    return index
+            return -1
+
+        def mouseMoveEvent(self, event):
+            hovered = self._index_at(event.position())
+            if hovered != self._hovered_index:
+                self._hovered_index = hovered
+                self.update()
+            super().mouseMoveEvent(event)
+
+        def leaveEvent(self, event):
+            self._hovered_index = -1
+            self.update()
+            super().leaveEvent(event)
+
+        def mousePressEvent(self, event):
+            if (
+                self.isEnabled()
+                and event.button() == QtCore.Qt.MouseButton.LeftButton
+            ):
+                index = self._index_at(event.position())
+                if index >= 0:
+                    self.setCurrentIndex(index, animate=True)
+                    event.accept()
+                    return
+            super().mousePressEvent(event)
+
+        def keyPressEvent(self, event):
+            key = event.key()
+            if key in (
+                QtCore.Qt.Key.Key_Left,
+                QtCore.Qt.Key.Key_Up,
+            ):
+                self.setCurrentIndex(self._current_index - 1, animate=True)
+                event.accept()
+                return
+            if key in (
+                QtCore.Qt.Key.Key_Right,
+                QtCore.Qt.Key.Key_Down,
+            ):
+                self.setCurrentIndex(self._current_index + 1, animate=True)
+                event.accept()
+                return
+            if key == QtCore.Qt.Key.Key_Home:
+                self.setCurrentIndex(0, animate=True)
+                event.accept()
+                return
+            if key == QtCore.Qt.Key.Key_End:
+                self.setCurrentIndex(len(self._items) - 1, animate=True)
+                event.accept()
+                return
+            super().keyPressEvent(event)
+
+        def resizeEvent(self, event):
+            super().resizeEvent(event)
+            self._sync_slider()
+
+        def changeEvent(self, event):
+            super().changeEvent(event)
+            if event.type() in (
+                QtCore.QEvent.Type.FontChange,
+                QtCore.QEvent.Type.ApplicationFontChange,
+            ):
+                self.refreshMetrics()
+
+        def paintEvent(self, event):
+            painter = QtGui.QPainter(self)
+            painter.setRenderHint(
+                QtGui.QPainter.RenderHint.Antialiasing,
+                True,
+            )
+            if not self.isEnabled():
+                painter.setOpacity(0.45)
+
+            if self._corner_radius is None:
+                outer_radius = float(self._scaled(7, 5))
+                slider_radius = float(self._scaled(6, 5))
+            else:
+                outer_radius = float(
+                    self._scaled(
+                        self._corner_radius,
+                        int(self._corner_radius * 0.75 + 0.5),
+                    )
+                )
+                slider_base = max(0.0, self._corner_radius - 1.0)
+                slider_radius = float(
+                    self._scaled(slider_base, int(slider_base * 0.75 + 0.5))
+                )
+            edge_inset = (
+                1.0
+                if self._paint_inset is None
+                else max(0.5, self._paint_inset * self._scale())
+            )
+            dpr, paint_rect = self._device_geometry()
+            edge_inset = self._device_aligned_inset(edge_inset, dpr)
+            outer = paint_rect.adjusted(
+                edge_inset,
+                edge_inset,
+                -edge_inset,
+                -edge_inset,
+            )
+            track = QtGui.QColor(self._theme["track"])
+            if self.hasFocus():
+                track = track.lighter(112)
+            painter.setPen(QtCore.Qt.PenStyle.NoPen)
+            painter.setBrush(track)
+            painter.drawRoundedRect(outer, outer_radius, outer_radius)
+
+            rects = self._segment_rects()
+            if (
+                0 <= self._hovered_index < len(rects)
+                and self._hovered_index != self._current_index
+            ):
+                painter.setBrush(self._theme["hover"])
+                painter.drawRoundedRect(
+                    rects[self._hovered_index],
+                    slider_radius,
+                    slider_radius,
+                )
+
+            slider = QtCore.QRectF(
+                self._slider_x,
+                rects[0].top() if rects else 0.0,
+                self._slider_width,
+                rects[0].height() if rects else 0.0,
+            )
+            shadow = self._theme["shadow"]
+            if shadow is not None:
+                painter.setBrush(shadow)
+                painter.drawRoundedRect(
+                    slider.translated(0, self._scaled(1, 1)),
+                    slider_radius,
+                    slider_radius,
+                )
+            painter.setBrush(self._theme["slider"])
+            painter.drawRoundedRect(
+                slider,
+                slider_radius,
+                slider_radius,
+            )
+            if self._theme["slider_border"] is not None:
+                painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+                painter.setPen(QtGui.QPen(self._theme["slider_border"], 1))
+                painter.drawRoundedRect(
+                    slider.adjusted(0.5, 0.5, -0.5, -0.5),
+                    slider_radius,
+                    slider_radius,
+                )
+                painter.setPen(QtCore.Qt.PenStyle.NoPen)
+
+            painter.setFont(self._font())
+            for index, ((label, _data), rect) in enumerate(
+                zip(self._items, rects)
+            ):
+                painter.setPen(
+                    self._theme["active_text"]
+                    if index == self._current_index
+                    else self._theme["muted"]
+                )
+                painter.drawText(
+                    rect,
+                    QtCore.Qt.AlignmentFlag.AlignCenter,
+                    label,
+                )
+
+            painter.end()
+
+    return _SegmentedControl()
 
 
 def _svg_with_breathing_room(source):
@@ -41,6 +548,243 @@ def _is_qt_object_alive(obj):
         except Exception:
             return False
         return True
+
+
+def install_compact_tooltip(widget, text):
+    """Install a compact tooltip with deterministic, UI-scale-aware metrics."""
+    if not text:
+        widget.setToolTip("")
+        return widget
+
+    from PySide6 import QtCore, QtGui, QtWidgets
+
+    base_font_px = 14
+    base_margin_x = 12
+    base_margin_y = 7
+    base_radius = 7
+
+    def scaled(value, scale):
+        return max(int(round(value * 0.75)), int(round(value * scale)))
+
+    def tooltip_font(source_font, scale):
+        font = QtGui.QFont(source_font)
+        font.setPixelSize(scaled(base_font_px, scale))
+        return font
+
+    def tooltip_label_stylesheet(font):
+        family = font.family().replace("\\", "\\\\").replace('"', '\\"')
+        style = "italic" if font.italic() else "normal"
+        return (
+            "background: transparent; border: 0; color: #e0e0e0; "
+            f'font-family: "{family}"; font-size: {font.pixelSize()}px; '
+            f"font-weight: {font.weight()}; font-style: {style};"
+        )
+
+    class _CompactTooltip(QtWidgets.QFrame):
+        def __init__(self, owner):
+            flags = (
+                QtCore.Qt.WindowType.ToolTip
+                | QtCore.Qt.WindowType.FramelessWindowHint
+                | QtCore.Qt.WindowType.NoDropShadowWindowHint
+            )
+            super().__init__(None, flags)
+            self._owner = owner
+            self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TranslucentBackground, True)
+            self.setAttribute(QtCore.Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+            self.setAutoFillBackground(False)
+            self.setObjectName("RizumCompactToolTip")
+            self._scale_override = None
+            self._scale = 1.0
+            self._radius = 5
+            layout = QtWidgets.QHBoxLayout(self)
+            layout.setContentsMargins(9, 5, 9, 5)
+            layout.setSpacing(0)
+            self._layout = layout
+            self._label = QtWidgets.QLabel(text)
+            self._label.setObjectName("RizumCompactToolTipLabel")
+            self._label.setTextFormat(QtCore.Qt.TextFormat.PlainText)
+            layout.addWidget(self._label)
+
+        def setText(self, next_text):
+            self._label.setText(next_text)
+            self.adjustSize()
+
+        def setScale(self, scale):
+            self._scale_override = None if scale is None else max(0.75, float(scale))
+            self.polishMetrics()
+
+        def scale(self):
+            return self._scale
+
+        def polishMetrics(self):
+            self._scale = self._scale_override if self._scale_override is not None else 1.0
+            font = tooltip_font(self._owner.font(), self._scale)
+            self._label.setFont(font)
+            # Painter's application stylesheet assigns a generic QLabel font.
+            # A local declaration is required or it silently replaces the
+            # runtime pixel size set above when the tooltip is polished.
+            self._label.setStyleSheet(tooltip_label_stylesheet(font))
+            self._radius = scaled(base_radius, self._scale)
+            self._layout.setContentsMargins(
+                scaled(base_margin_x, self._scale),
+                scaled(base_margin_y, self._scale),
+                scaled(base_margin_x, self._scale),
+                scaled(base_margin_y, self._scale),
+            )
+            self.updateGeometry()
+            self.update()
+
+        def paintEvent(self, event):
+            painter = QtGui.QPainter(self)
+            painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
+            rect = QtCore.QRectF(0.5, 0.5, self.width() - 1, self.height() - 1)
+            painter.setPen(QtGui.QPen(QtGui.QColor("#414141"), 1))
+            painter.setBrush(QtGui.QColor("#1b1b1b"))
+            painter.drawRoundedRect(rect, self._radius, self._radius)
+            painter.end()
+
+    class _CompactTooltipFilter(QtCore.QObject):
+        def __init__(self, owner):
+            super().__init__(owner)
+            self._owner = owner
+            self._tooltip = None
+            self._text = str(text)
+            self._scale_override = None
+            self._last_global_pos = None
+            self._timer = QtCore.QTimer(self)
+            self._timer.setSingleShot(True)
+            self._timer.setInterval(420)
+            self._timer.timeout.connect(self._show_delayed)
+
+        def _ensure_tooltip(self):
+            if _is_qt_object_alive(self._tooltip):
+                return self._tooltip
+            self._tooltip = _CompactTooltip(self._owner)
+            self._tooltip.setScale(self._scale_override)
+            return self._tooltip
+
+        def _hide_tooltip(self):
+            self._timer.stop()
+            if _is_qt_object_alive(self._tooltip):
+                self._tooltip.hide()
+
+        def setScale(self, scale):
+            self._scale_override = None if scale is None else max(0.75, float(scale))
+            if _is_qt_object_alive(self._tooltip):
+                self._tooltip.setScale(self._scale_override)
+                self._tooltip.adjustSize()
+
+        def setText(self, next_text):
+            self._text = str(next_text or "")
+            if not self._text:
+                self._hide_tooltip()
+            elif _is_qt_object_alive(self._tooltip):
+                self._tooltip.setText(self._text)
+
+        def refreshMetrics(self):
+            if _is_qt_object_alive(self._tooltip):
+                self._tooltip.setScale(self._scale_override)
+                self._tooltip.adjustSize()
+
+        def _event_global_pos(self, obj, event):
+            if hasattr(event, "globalPosition"):
+                return event.globalPosition().toPoint()
+            if hasattr(event, "globalPos"):
+                return event.globalPos()
+            try:
+                return obj.mapToGlobal(event.position().toPoint())
+            except Exception:
+                try:
+                    return obj.mapToGlobal(event.pos())
+                except Exception:
+                    return QtGui.QCursor.pos()
+
+        def _schedule_tooltip(self, global_pos):
+            self._last_global_pos = QtCore.QPoint(global_pos)
+            if _is_qt_object_alive(self._tooltip) and self._tooltip.isVisible():
+                self._show_tooltip(self._last_global_pos)
+                return
+            self._timer.start()
+
+        def _show_delayed(self):
+            if not _is_qt_object_alive(self._owner) or not self._owner.underMouse():
+                return
+            self._show_tooltip(self._last_global_pos or QtGui.QCursor.pos())
+
+        def _show_tooltip(self, global_pos):
+            tooltip = self._ensure_tooltip()
+            tooltip.polishMetrics()
+            tooltip.setText(self._text)
+            tooltip.adjustSize()
+            scale = tooltip.scale()
+            offset_x = scaled(8, scale)
+            offset_y = scaled(14, scale)
+            screen_pad = scaled(4, scale)
+            pos = QtCore.QPoint(global_pos) + QtCore.QPoint(offset_x, offset_y)
+            screen = QtGui.QGuiApplication.screenAt(global_pos)
+            if screen is None:
+                screen = QtWidgets.QApplication.primaryScreen()
+            if screen is not None:
+                bounds = screen.availableGeometry()
+                if pos.x() + tooltip.width() > bounds.right():
+                    pos.setX(
+                        max(bounds.left(), bounds.right() - tooltip.width() - screen_pad)
+                    )
+                if pos.y() + tooltip.height() > bounds.bottom():
+                    pos.setY(
+                        max(
+                            bounds.top(),
+                            global_pos.y() - tooltip.height() - scaled(12, scale),
+                        )
+                    )
+            tooltip.move(pos)
+            tooltip.show()
+
+        def eventFilter(self, obj, event):
+            event_type = event.type()
+            if event_type == QtCore.QEvent.Type.ToolTip:
+                return True
+            if event_type in (
+                QtCore.QEvent.Type.Enter,
+                QtCore.QEvent.Type.HoverEnter,
+            ):
+                self._schedule_tooltip(self._event_global_pos(obj, event))
+            elif event_type in (
+                QtCore.QEvent.Type.MouseMove,
+                QtCore.QEvent.Type.HoverMove,
+            ):
+                self._last_global_pos = self._event_global_pos(obj, event)
+                if _is_qt_object_alive(self._tooltip) and self._tooltip.isVisible():
+                    self._show_tooltip(self._last_global_pos)
+            if event_type in (
+                QtCore.QEvent.Type.Leave,
+                QtCore.QEvent.Type.HoverLeave,
+                QtCore.QEvent.Type.MouseButtonPress,
+                QtCore.QEvent.Type.Hide,
+                QtCore.QEvent.Type.Destroy,
+                QtCore.QEvent.Type.WindowDeactivate,
+            ):
+                self._hide_tooltip()
+            elif event_type in (
+                QtCore.QEvent.Type.FontChange,
+                QtCore.QEvent.Type.ApplicationFontChange,
+            ):
+                self.refreshMetrics()
+            return False
+
+    widget.setToolTip("")
+    widget.setMouseTracking(True)
+    widget.setAttribute(QtCore.Qt.WidgetAttribute.WA_Hover, True)
+    previous = getattr(widget, "_rizum_compact_tooltip_filter", None)
+    if previous is not None:
+        widget.removeEventFilter(previous)
+    tooltip_filter = _CompactTooltipFilter(widget)
+    widget.installEventFilter(tooltip_filter)
+    widget._rizum_compact_tooltip_filter = tooltip_filter
+    widget.setCompactTooltipScale = tooltip_filter.setScale
+    widget.setCompactTooltipText = tooltip_filter.setText
+    widget.refreshCompactTooltip = tooltip_filter.refreshMetrics
+    return widget
 
 
 class Card:
@@ -171,8 +915,6 @@ def make_dock_action_button(label, icon_name, primary=False, tooltip="", parent=
             )
             self._visual_scale = 1.0
             self._animation = None
-            if tooltip:
-                self.setToolTip(tooltip)
 
         def getVisualScale(self):
             return self._visual_scale
@@ -286,7 +1028,10 @@ def make_dock_action_button(label, icon_name, primary=False, tooltip="", parent=
             )
             painter.end()
 
-    return _DockActionButton()
+    button = _DockActionButton()
+    if tooltip:
+        install_compact_tooltip(button, tooltip)
+    return button
 
 
 def make_dock_actions_panel(actions=None, width=260, parent=None):
@@ -685,7 +1430,7 @@ def update_compact_field_row(row_widget, label_width=None, control_width=None):
 
 def compact_text_width(text, widget=None, minimum=0, maximum=None, padding=0):
     """Return a clamped text width using the active Qt font metrics."""
-    from PySide6 import QtGui, QtWidgets
+    from PySide6 import QtCore, QtGui, QtWidgets
 
     if widget is not None:
         font = widget.font()
@@ -1526,6 +2271,123 @@ def make_inset_separator(inset, thickness=2):
     return wrapper
 
 
+def make_painter_title_bar(title, parent=None):
+    """Create preview chrome matching Painter's native light title bar."""
+    from PySide6 import QtCore, QtGui, QtWidgets
+
+    base_height = PAINTER_TITLE_BAR_HEIGHT
+
+    class _PainterTitleBar(QtWidgets.QWidget):
+        def __init__(self):
+            super().__init__(parent)
+            self.setObjectName("RizumPainterTitleBar")
+            self.setAttribute(QtCore.Qt.WidgetAttribute.WA_StyledBackground, True)
+            self._compact_height = base_height
+            self._layout = QtWidgets.QHBoxLayout(self)
+            self._layout.setSpacing(8)
+
+            self._app_icon = QtWidgets.QLabel("Pt")
+            self._app_icon.setObjectName("RizumPainterTitleBarIcon")
+            self._app_icon.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            self._title = QtWidgets.QLabel(str(title))
+            self._title.setObjectName("RizumPainterTitleBarText")
+            self._close = QtWidgets.QLabel("×")
+            self._close.setObjectName("RizumPainterTitleBarClose")
+            self._close.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+
+            self._layout.addWidget(self._app_icon)
+            self._layout.addWidget(self._title)
+            self._layout.addStretch(1)
+            self._layout.addWidget(self._close)
+            self.setCompactHeight(base_height)
+
+        def setCompactHeight(self, height):
+            # This represents Windows chrome, not Painter content. Native title
+            # bars stay fixed when the Painter UI font scale changes.
+            self._compact_height = base_height
+            self.setFixedHeight(self._compact_height)
+            self._layout.setContentsMargins(10, 0, 7, 0)
+            self._layout.setSpacing(8)
+            self._app_icon.setFixedSize(14, 14)
+            self._close.setFixedSize(22, 22)
+
+            title_font = QtGui.QFont("Segoe UI")
+            title_font.setPixelSize(12)
+            title_font.setWeight(QtGui.QFont.Weight.Normal)
+            self._title.setFont(title_font)
+            close_font = QtGui.QFont(title_font)
+            close_font.setPixelSize(18)
+            self._close.setFont(close_font)
+            icon_font = QtGui.QFont(title_font)
+            icon_font.setPixelSize(8)
+            icon_font.setWeight(QtGui.QFont.Weight.Bold)
+            self._app_icon.setFont(icon_font)
+
+            self.setStyleSheet(
+                """
+                QWidget#RizumPainterTitleBar {
+                    background: #f3f3f3;
+                    border: 0;
+                    border-top-left-radius: 8px;
+                    border-top-right-radius: 8px;
+                }
+                QLabel#RizumPainterTitleBarText {
+                    color: #202020;
+                    background: transparent;
+                    border: 0;
+                }
+                QLabel#RizumPainterTitleBarClose {
+                    color: #222222;
+                    background: transparent;
+                    border: 0;
+                }
+                QLabel#RizumPainterTitleBarIcon {
+                    color: #98e73f;
+                    background: #1e3101;
+                    border: 0;
+                    border-radius: 2px;
+                }
+                """
+            )
+            self.updateGeometry()
+
+    return _PainterTitleBar()
+
+
+def make_painter_window_content(background="#1b1b1b", parent=None):
+    """Create Painter's rounded client area below the native title bar."""
+    from PySide6 import QtCore, QtWidgets
+
+    class _PainterWindowContent(QtWidgets.QFrame):
+        def __init__(self):
+            super().__init__(parent)
+            self.setObjectName("RizumPainterWindowContent")
+            self.setAttribute(QtCore.Qt.WidgetAttribute.WA_StyledBackground, True)
+            self._content_layout = QtWidgets.QVBoxLayout(self)
+            self._content_layout.setContentsMargins(0, 0, 0, 0)
+            self._content_layout.setSpacing(0)
+            self.setPainterContentColor(background)
+
+        def contentLayout(self):
+            return self._content_layout
+
+        def setPainterContentColor(self, color):
+            self.setStyleSheet(
+                f"""
+                QFrame#RizumPainterWindowContent {{
+                    background: {color};
+                    border: 0;
+                    border-top-left-radius: {PAINTER_WINDOW_CONTENT_RADIUS}px;
+                    border-top-right-radius: {PAINTER_WINDOW_CONTENT_RADIUS}px;
+                    border-bottom-left-radius: {PAINTER_WINDOW_CONTENT_BOTTOM_RADIUS}px;
+                    border-bottom-right-radius: {PAINTER_WINDOW_CONTENT_BOTTOM_RADIUS}px;
+                }}
+                """
+            )
+
+    return _PainterWindowContent()
+
+
 def make_icon_button(icon_name, tooltip="", size=16, compact=True):
     """Create a themed icon button from the shared icons folder."""
     from PySide6 import QtCore, QtGui, QtWidgets
@@ -1547,6 +2409,7 @@ def make_icon_button(icon_name, tooltip="", size=16, compact=True):
                 pass
             self._pixmap_cache = {}
             self._icon_size = int(size)
+            self._button_base_size = 22 if compact else 32
             self._visual_scale = 1.0
             self._visual_opacity = 1.0
             self.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
@@ -1667,10 +2530,19 @@ def make_icon_button(icon_name, tooltip="", size=16, compact=True):
             # so the highlight sits 1px inside the button edge, with 6px corners.
             if self.isEnabled() and (self.underMouse() or self.isDown()):
                 bg_alpha = 75 if self.isDown() else 30
+                frame_size = max(1, min(self.width(), self.height()))
+                frame_scale = max(0.75, frame_size / float(self._button_base_size))
+                hover_inset = max(1, int(round(1 * frame_scale)))
+                hover_radius = max(5, int(round(6 * frame_scale)))
                 painter.setPen(QtCore.Qt.PenStyle.NoPen)
                 painter.setBrush(QtGui.QColor(255, 255, 255, bg_alpha))
-                rect = QtCore.QRectF(self.rect()).adjusted(1, 1, -1, -1)
-                painter.drawRoundedRect(rect, 6, 6)
+                rect = QtCore.QRectF(self.rect()).adjusted(
+                    hover_inset,
+                    hover_inset,
+                    -hover_inset,
+                    -hover_inset,
+                )
+                painter.drawRoundedRect(rect, hover_radius, hover_radius)
             # Priority: disabled > hover > accent > default. Hover must come
             # before accent so accent buttons still get a visible hover change
             # (accent default #e0e0e0 -> hover #ffffff) instead of staying
@@ -1705,7 +2577,7 @@ def make_icon_button(icon_name, tooltip="", size=16, compact=True):
     else:
         button.setMinimumHeight(32)
     if tooltip:
-        button.setToolTip(tooltip)
+        install_compact_tooltip(button, tooltip)
     return button
 
 
@@ -2015,6 +2887,7 @@ def make_drag_tree_item(
     removable=False,
     on_remove=None,
     masked=False,
+    mapped=False,
     child=True,
     parent=None,
 ):
@@ -2029,6 +2902,7 @@ def make_drag_tree_item(
             self.setObjectName("RizumDragTreeItem")
             self.setProperty("child", "true" if child else "false")
             self.setProperty("folder", bool(folder))
+            self.setProperty("mapped", bool(mapped))
             self.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
             self.setMouseTracking(True)
             self.setCursor(
@@ -2326,12 +3200,20 @@ def make_spin_input(value=1.0, minimum=0.75, maximum=2.0, step=0.05, decimals=2)
     return _SpinInput()
 
 
-def make_compact_stepper(value=8, minimum=0, maximum=999, step=1):
-    """Create a compact three-part numeric stepper with a Painter-style edit value."""
+def make_compact_stepper(
+    value=8,
+    minimum=0,
+    maximum=999,
+    step=1,
+    decimals=0,
+):
+    """Create a compact editable numeric stepper with Painter-style controls."""
     from PySide6 import QtCore, QtGui, QtWidgets
 
+    from .theme import default_theme
+
     class _CompactStepper(QtWidgets.QWidget):
-        valueChanged = QtCore.Signal(int)
+        valueChanged = QtCore.Signal(object)
 
         def __init__(self):
             super().__init__()
@@ -2342,10 +3224,13 @@ def make_compact_stepper(value=8, minimum=0, maximum=999, step=1):
             self.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
             self.setMouseTracking(True)
             self.setFixedSize(120, 32)
-            self._value = int(value)
-            self._minimum = int(minimum)
-            self._maximum = int(maximum)
-            self._step = int(step)
+            self._compact_height = 32
+            self._decimals = max(0, int(decimals))
+            number_type = float if self._decimals else int
+            self._minimum = number_type(minimum)
+            self._maximum = number_type(maximum)
+            self._step = number_type(step)
+            self._value = self._normalized_value(value)
             self._hover_part = None
             self._pressed_part = None
             self._animated_part = None
@@ -2353,24 +3238,27 @@ def make_compact_stepper(value=8, minimum=0, maximum=999, step=1):
             self._visual_opacity = 1.0
             self._animation = None
             self._editing = False
-            self._edit_text = str(self._value)
+            self._edit_text = self._formatted_value(self._value)
             self._replace_edit_text = False
             self._theme = {
-                "background": "#1b1b1b",
-                "text": "#e0e0e0",
-                "muted": "#9e9e9e",
-                "hover": "rgba(255, 255, 255, 0.04)",
+                "background": default_theme.surface,
+                "text": default_theme.text,
+                "muted": default_theme.text_muted,
+                "hover": default_theme.surface_child_hover,
             }
             self.setValue(value, emit=False)
 
         def setTheme(self, theme):
             self._theme = {
-                "background": theme.get("window_bg", "#1b1b1b"),
-                "text": theme.get("text", "#e0e0e0"),
-                "muted": theme.get("muted", theme.get("text_secondary", "#9e9e9e")),
+                "background": theme.get("window_bg", default_theme.surface),
+                "text": theme.get("text", default_theme.text),
+                "muted": theme.get(
+                    "muted",
+                    theme.get("text_secondary", default_theme.text_muted),
+                ),
                 "hover": theme.get(
                     "control_hover",
-                    theme.get("hover", "rgba(255, 255, 255, 0.04)"),
+                    theme.get("hover", default_theme.surface_child_hover),
                 ),
             }
             self.update()
@@ -2379,23 +3267,51 @@ def make_compact_stepper(value=8, minimum=0, maximum=999, step=1):
             return self._value
 
         def setValue(self, value, emit=True):
-            next_value = max(self._minimum, min(self._maximum, int(value)))
+            next_value = self._normalized_value(value)
             if next_value == self._value:
-                self._edit_text = str(self._value)
+                self._edit_text = self._formatted_value(self._value)
                 return
             self._value = next_value
-            self._edit_text = str(self._value)
+            self._edit_text = self._formatted_value(self._value)
             self.update()
             if emit:
                 self.valueChanged.emit(self._value)
 
         def setRange(self, minimum, maximum):
-            self._minimum = int(minimum)
-            self._maximum = int(maximum)
+            number_type = float if self._decimals else int
+            self._minimum = number_type(minimum)
+            self._maximum = number_type(maximum)
             self.setValue(self._value)
 
         def setSingleStep(self, step):
-            self._step = int(step)
+            number_type = float if self._decimals else int
+            self._step = number_type(step)
+
+        def setCompactHeight(self, height):
+            """Scale the frame and painted geometry from the 32px baseline."""
+            self._compact_height = max(24, int(round(height)))
+            scale = self._compact_height / 32.0
+            self.setFixedSize(
+                max(90, int(round(120 * scale))),
+                self._compact_height,
+            )
+            self.updateGeometry()
+            self.update()
+
+        def _normalized_value(self, value):
+            number = float(value)
+            number = max(float(self._minimum), min(float(self._maximum), number))
+            if self._decimals:
+                return round(number, self._decimals)
+            return int(round(number))
+
+        def _formatted_value(self, value):
+            if self._decimals:
+                return f"{float(value):.{self._decimals}f}"
+            return str(int(round(float(value))))
+
+        def _geometry_scale(self):
+            return self._compact_height / 32.0
 
         def getVisualScale(self):
             return self._visual_scale
@@ -2418,10 +3334,16 @@ def make_compact_stepper(value=8, minimum=0, maximum=999, step=1):
             # Layout: [value][-][+] with 28x28 buttons centered vertically in
             # the 32px height. Text starts at x=11 so the left visual gap
             # matches the + glyph's right visual gap (~11px).
+            scale = self._geometry_scale()
             if part == "value":
-                return QtCore.QRectF(0, 0, 54, 32)
+                return QtCore.QRectF(0, 0, 54 * scale, 32 * scale)
             x = 60 if part == "minus" else 90
-            return QtCore.QRectF(x, 2, 28, 28)
+            return QtCore.QRectF(
+                x * scale,
+                2 * scale,
+                28 * scale,
+                28 * scale,
+            )
 
         def _hover_rect_for(self, part):
             rect = self._rect_for(part)
@@ -2430,7 +3352,7 @@ def make_compact_stepper(value=8, minimum=0, maximum=999, step=1):
             return rect.adjusted(1, 1, -1, -1)
 
         def _hover_color(self):
-            color = self._theme.get("hover", "rgba(255, 255, 255, 0.04)")
+            color = self._theme.get("hover", default_theme.surface_child_hover)
             if isinstance(color, QtGui.QColor):
                 parsed = QtGui.QColor(color)
                 return self._composited_hover_color(parsed)
@@ -2451,9 +3373,9 @@ def make_compact_stepper(value=8, minimum=0, maximum=999, step=1):
         def _composited_hover_color(self, overlay):
             if overlay.alpha() >= 255:
                 return overlay
-            base = QtGui.QColor(self._theme.get("background", "#1b1b1b"))
+            base = QtGui.QColor(self._theme.get("background", default_theme.surface))
             if not base.isValid():
-                base = QtGui.QColor("#1b1b1b")
+                base = QtGui.QColor(default_theme.surface)
             alpha = overlay.alphaF()
             return QtGui.QColor(
                 round(overlay.red() * alpha + base.red() * (1 - alpha)),
@@ -2498,7 +3420,7 @@ def make_compact_stepper(value=8, minimum=0, maximum=999, step=1):
 
         def _start_edit(self):
             self._editing = True
-            self._edit_text = str(self._value)
+            self._edit_text = self._formatted_value(self._value)
             self._replace_edit_text = True
             self.setFocus(QtCore.Qt.FocusReason.MouseFocusReason)
             self.update()
@@ -2507,10 +3429,13 @@ def make_compact_stepper(value=8, minimum=0, maximum=999, step=1):
             if not self._editing:
                 return
             text = self._edit_text.strip()
-            if text:
-                self.setValue(int(text))
+            if text not in ("", "-", ".", "-."):
+                try:
+                    self.setValue(float(text))
+                except ValueError:
+                    self._edit_text = self._formatted_value(self._value)
             else:
-                self._edit_text = str(self._value)
+                self._edit_text = self._formatted_value(self._value)
             self._editing = False
             self._replace_edit_text = False
             self.update()
@@ -2518,7 +3443,7 @@ def make_compact_stepper(value=8, minimum=0, maximum=999, step=1):
         def _cancel_edit(self):
             if not self._editing:
                 return
-            self._edit_text = str(self._value)
+            self._edit_text = self._formatted_value(self._value)
             self._editing = False
             self._replace_edit_text = False
             self.update()
@@ -2604,12 +3529,26 @@ def make_compact_stepper(value=8, minimum=0, maximum=999, step=1):
                     event.accept()
                     return
                 text = event.text()
-                if text and text.isdigit():
+                is_decimal = self._decimals and text in (".", ",")
+                is_negative = text == "-" and self._minimum < 0
+                if text and (text.isdigit() or is_decimal or is_negative):
                     seed = "" if self._replace_edit_text else self._edit_text
-                    next_text = (seed + text).lstrip("0") or "0"
-                    if int(next_text) <= self._maximum:
+                    character = "." if is_decimal else text
+                    next_text = seed + character
+                    if character == "." and "." in seed:
+                        event.accept()
+                        return
+                    if character == "-" and seed:
+                        event.accept()
+                        return
+                    if "." in next_text:
+                        fraction = next_text.partition(".")[2]
+                        if len(fraction) > self._decimals:
+                            event.accept()
+                            return
+                    if len(next_text) <= 16:
                         self._edit_text = next_text
-                        self._replace_edit_text = False
+                    self._replace_edit_text = False
                     self.update()
                     event.accept()
                     return
@@ -2650,12 +3589,14 @@ def make_compact_stepper(value=8, minimum=0, maximum=999, step=1):
                     rect = self._hover_rect_for(part)
                     painter.setPen(QtCore.Qt.PenStyle.NoPen)
                     painter.setBrush(QtGui.QColor(255, 255, 255, 75))
-                    painter.drawRoundedRect(rect, 6, 6)
+                    radius = 6 * self._geometry_scale()
+                    painter.drawRoundedRect(rect, radius, radius)
                 elif is_hovered:
                     rect = self._hover_rect_for(part)
                     painter.setPen(QtCore.Qt.PenStyle.NoPen)
                     painter.setBrush(self._hover_color())
-                    painter.drawRoundedRect(rect, 6, 6)
+                    radius = 6 * self._geometry_scale()
+                    painter.drawRoundedRect(rect, radius, radius)
 
             symbol_center_y = self._value_visual_center_y()
             self._draw_step_symbol(painter, "minus", symbol_center_y)
@@ -2667,7 +3608,9 @@ def make_compact_stepper(value=8, minimum=0, maximum=999, step=1):
 
         def _value_font(self):
             font = QtGui.QFont(self.font())
-            font.setPixelSize(14)
+            font.setPixelSize(
+                max(11, int(round(14 * self._geometry_scale())))
+            )
             font.setWeight(QtGui.QFont.Weight.Medium)
             return font
 
@@ -2694,7 +3637,7 @@ def make_compact_stepper(value=8, minimum=0, maximum=999, step=1):
             baseline = self._value_baseline(font)
             # Left-align the number so it lines up with combo input text.
             painter.drawText(
-                QtCore.QPointF(11, baseline),
+                QtCore.QPointF(11 * self._geometry_scale(), baseline),
                 self._value_text(),
             )
 
@@ -2703,12 +3646,22 @@ def make_compact_stepper(value=8, minimum=0, maximum=999, step=1):
             font = self._value_font()
             metrics = QtGui.QFontMetricsF(font)
             # Cursor follows the left-aligned text, just past its right edge.
-            cursor_x = 11 + metrics.horizontalAdvance(self._value_text()) + 1
-            cursor_top = rect.center().y() - 7
-            painter.setPen(QtGui.QPen(QtGui.QColor(self._theme["text"]), 1))
+            scale = self._geometry_scale()
+            cursor_x = (
+                11 * scale
+                + metrics.horizontalAdvance(self._value_text())
+                + scale
+            )
+            cursor_top = rect.center().y() - 7 * scale
+            painter.setPen(
+                QtGui.QPen(
+                    QtGui.QColor(self._theme["text"]),
+                    max(1.0, scale),
+                )
+            )
             painter.drawLine(
                 QtCore.QPointF(cursor_x, cursor_top),
-                QtCore.QPointF(cursor_x, cursor_top + 14),
+                QtCore.QPointF(cursor_x, cursor_top + 14 * scale),
             )
 
         def _draw_step_symbol(self, painter, part, center_y):
@@ -2716,13 +3669,20 @@ def make_compact_stepper(value=8, minimum=0, maximum=999, step=1):
             scale = self._visual_scale if part == self._animated_part else 1.0
             opacity = self._visual_opacity if part == self._animated_part else 1.0
             color = self._theme["text"] if part == self._hover_part else self._theme["muted"]
-            pen = QtGui.QPen(QtGui.QColor(color), 1.8)
+            geometry_scale = self._geometry_scale()
+            pen = QtGui.QPen(
+                QtGui.QColor(color),
+                max(1.35, 1.8 * geometry_scale),
+            )
             pen.setCapStyle(QtCore.Qt.PenCapStyle.RoundCap)
             previous_opacity = painter.opacity()
             painter.setOpacity(previous_opacity * max(0.0, min(1.0, opacity)))
             painter.setPen(pen)
-            half = 4.8 * scale
-            center = QtCore.QPointF(rect.center().x(), center_y - 0.5)
+            half = 4.8 * scale * geometry_scale
+            center = QtCore.QPointF(
+                rect.center().x(),
+                center_y - 0.5 * geometry_scale,
+            )
             painter.drawLine(
                 QtCore.QPointF(center.x() - half, center.y()),
                 QtCore.QPointF(center.x() + half, center.y()),
