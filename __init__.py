@@ -39,8 +39,8 @@ _DEFAULT_DOCK_WIDTH = _MIN_DOCK_WIDTH
 _DEFAULT_DOCK_HEIGHT = 184
 _RESET_BUTTON_WIDTH = 68
 _SAVE_BUTTON_WIDTH = 72
-_HINT_ROW_MIN_WIDTH = 108
-_HINT_ROW_MAX_WIDTH = 184
+_HINT_ROW_MIN_WIDTH = 88
+_HINT_ROW_MAX_WIDTH = 150
 _DEFAULT_LANGUAGE = "en"
 _I18N_DIR = _PLUGIN_ROOT / "i18n"
 _PAINTER_LOCALE_PATTERN = re.compile(r"Using locale:\s*([A-Za-z]{2}(?:[_-][A-Za-z]{2})?)")
@@ -237,8 +237,9 @@ class UiScalePanel:
         tool_row.setSpacing(0)
 
         icon_group = QtWidgets.QHBoxLayout()
+        self._icon_group = icon_group
         icon_group.setContentsMargins(0, 0, 0, 0)
-        icon_group.setSpacing(2)
+        icon_group.setSpacing(4)
         self.browse_btn = self.ui.make_icon_button("folder.svg", self._tr("open_fonts_folder"))
         self._install_compact_tooltip(self.browse_btn, self._tr("open_fonts_folder"))
         self.browse_btn.setProperty("accent", True)
@@ -260,11 +261,6 @@ class UiScalePanel:
             minimum=_HINT_ROW_MIN_WIDTH,
             maximum=_HINT_ROW_MAX_WIDTH,
         )
-        # Align the checkbox with the combo's chevron: the combo container has
-        # 8px right margin + ~7px half-chevron offset, while the hint row has
-        # 8px right margin. Add the difference so the checkbox sits at the same
-        # x as the chevron.
-        self.hint_widget.layout().setContentsMargins(8, 4, 8 + 7, 4)
         tool_row.addWidget(self.hint_widget)
         main_layout.addLayout(tool_row)
 
@@ -282,40 +278,18 @@ class UiScalePanel:
         footer_row = QtWidgets.QWidget()
         footer_row.setObjectName("RizumTransparent")
         footer_layout = QtWidgets.QHBoxLayout(footer_row)
+        self._footer_layout = footer_layout
         footer_layout.setContentsMargins(10, 0, 10, 0)
         footer_layout.setSpacing(8)
         footer_layout.addStretch(1)
-        self._save_feedback = QtWidgets.QLabel("")
-        self._save_feedback.setObjectName("RizumHintLabel")
-        self._save_feedback.setStyleSheet("color: #37c98b; background: transparent; border: 0;")
-        self._save_feedback.setAlignment(self.QtCore.Qt.AlignmentFlag.AlignRight | self.QtCore.Qt.AlignmentFlag.AlignVCenter)
-        self._save_feedback.setFixedHeight(22)
-        self._save_feedback.hide()
-        footer_layout.addWidget(self._save_feedback)
         self.undo_btn = self.ui.make_icon_button("undo.svg", self._tr("undo"))
         self._install_compact_tooltip(self.undo_btn, self._tr("undo"))
         self.undo_btn.setProperty("accent", True)
         self.undo_btn.clicked.connect(self._undo_live)
         footer_layout.addWidget(self.undo_btn)
-        self.reset_btn = self.ui.ActionButton.create(self._tr("reset"), "dialog-secondary")
-        self.ui.set_compact_footer_button_width(
-            self.reset_btn,
-            self.ui.compact_footer_button_width(
-                self.reset_btn,
-                minimum=_RESET_BUTTON_WIDTH,
-                maximum=118,
-            ),
-        )
+        self.reset_btn = self.ui.SecondaryActionButton(self._tr("reset"))
         self.reset_btn.clicked.connect(self.reset)
-        self.save_btn = self.ui.ActionButton.create(self._tr("save"), "dialog-primary")
-        self.ui.set_compact_footer_button_width(
-            self.save_btn,
-            self.ui.compact_footer_button_width(
-                self.save_btn,
-                minimum=_SAVE_BUTTON_WIDTH,
-                maximum=112,
-            ),
-        )
+        self.save_btn = self.ui.AnimatedSaveButton(self._tr("save"))
         self.save_btn.clicked.connect(self.save)
         footer_layout.addWidget(self.reset_btn)
         footer_layout.addWidget(self.save_btn)
@@ -481,6 +455,14 @@ class UiScalePanel:
                 self.undo_btn.setEnabled(self.session.can_undo)
             except Exception:
                 pass
+        if hasattr(self, "save_btn") and hasattr(self.save_btn, "setDirty"):
+            try:
+                self.save_btn.setDirty(
+                    self._current_state() != self._saved_state,
+                    animate=self.widget.isVisible(),
+                )
+            except Exception:
+                pass
 
     def _set_controls(self, state, block=True):
         state = FontState.from_value(state)
@@ -530,7 +512,23 @@ class UiScalePanel:
         try:
             self.hinting_cb.toggled.connect(self._apply_font)
         except Exception:
-            pass
+            self._connect_mock_hinting_sync()
+
+    def _connect_mock_hinting_sync(self):
+        def wrap_press(widget):
+            original_press = widget.mousePressEvent
+
+            def press(event):
+                original_press(event)
+                self._apply_font()
+
+            widget.mousePressEvent = press
+
+        for widget in (self.hinting_cb, self.hint_widget):
+            try:
+                wrap_press(widget)
+            except Exception:
+                pass
 
     def _apply_font(self):
         """Apply the current control values to the live UI without persisting."""
@@ -554,11 +552,14 @@ class UiScalePanel:
     def save(self):
         """Persist the current live state to QSettings."""
         self._saved_state = self.session.save(self._current_state())
-        self._update_undo_enabled()
         self._show_save_feedback()
+        self._update_undo_enabled()
 
     def _show_save_feedback(self):
-        """Show 'Saved' text briefly, then fade out."""
+        """Show the shared in-button confirmation or the fallback label."""
+        if hasattr(self.save_btn, "showSavedFeedback"):
+            self.save_btn.showSavedFeedback()
+            return
         label = getattr(self, "_save_feedback", None)
         if label is None:
             return
@@ -593,7 +594,7 @@ class UiScalePanel:
             QtCore.QTimer.singleShot(1400, label.hide)
 
     def reset(self):
-        self._saved_state = self.session.reset(before_apply=self._set_controls)
+        self.session.revert_to(FontState(), before_apply=self._set_controls)
         self._update_undo_enabled()
 
     def close(self):
@@ -631,9 +632,9 @@ class UiScalePanel:
             return self.ui.compact_label_width(
                 [self._tr("size"), self._tr("font")],
                 widget=self.widget,
-                minimum=int(round(36 * scale)),
-                maximum=int(round(116 * scale)),
-                padding=14,
+                minimum=max(21, int(round(28 * scale))),
+                maximum=max(42, int(round(56 * scale))),
+                padding=max(5, int(round(6 * scale))),
             )
         scale = self._font_scale()
         base = 44 if self.language in {"ja", "es"} else 28
@@ -728,21 +729,18 @@ class UiScalePanel:
                 self._footer.setFixedHeight(footer_h)
         except Exception:
             pass
-        # Icon buttons (folder/undo/refresh): stepper-size 32×32 frame, with
-        # icon proportion (17px, ~53%) tuned for detailed SVG icons. 2px gap
-        # matches stepper.
-        icon_btn_size = max(21, int(round(32 * scale)))
-        icon_px = max(12, int(round(17 * scale)))
-        for attr in ("browse_btn", "undo_btn", "refresh_btn"):
+        tool_icon_size = max(17, int(round(22 * scale)))
+        tool_icon_px = max(12, int(round(16 * scale)))
+        for attr in ("browse_btn", "refresh_btn"):
             btn = getattr(self, attr, None)
             if btn is None:
                 continue
             try:
-                btn.setFixedSize(icon_btn_size, icon_btn_size)
+                btn.setFixedSize(tool_icon_size, tool_icon_size)
             except Exception:
                 pass
             try:
-                btn.setPaintedIconSize(icon_px)
+                btn.setPaintedIconSize(tool_icon_px)
             except Exception:
                 pass
             try:
@@ -750,18 +748,13 @@ class UiScalePanel:
                     btn.setCompactTooltipScale(scale)
             except Exception:
                 pass
-        # Hint checkbox row margins scale with the font. Small right offset
-        # aligns the checkbox with the combo's chevron.
+        undo_size = max(24, int(round(32 * scale)))
+        undo_icon_px = max(13, int(round(17 * scale)))
         try:
-            if hasattr(self, "hint_widget"):
-                layout = self.hint_widget.layout()
-                if layout is not None:
-                    layout.setContentsMargins(
-                        int(round(8 * scale)),
-                        int(round(4 * scale)),
-                        int(round((8 + 1) * scale)),
-                        int(round(4 * scale)),
-                    )
+            self.undo_btn.setFixedSize(undo_size, undo_size)
+            self.undo_btn.setPaintedIconSize(undo_icon_px)
+            if hasattr(self.undo_btn, "setCompactTooltipScale"):
+                self.undo_btn.setCompactTooltipScale(scale)
         except Exception:
             pass
         # Mock checkbox glyph scales with the font (default 14px).
@@ -778,11 +771,19 @@ class UiScalePanel:
 
         scale = self._font_scale()
         self._apply_compact_heights(scale)
+        field_gap = max(6, int(round(8 * scale)))
         label_width = self._label_width()
         if hasattr(self, "tool_row"):
             self.tool_row.setContentsMargins(
-                label_width + 8, int(round(-6 * scale)), 0, int(round(2 * scale))
+                label_width + field_gap,
+                int(round(-6 * scale)),
+                0,
+                max(2, int(round(2 * scale))),
             )
+        for row in self._styled_rows.values():
+            row.layout().setSpacing(field_gap)
+        if hasattr(self, "_icon_group"):
+            self._icon_group.setSpacing(max(3, int(round(4 * scale))))
         if "size" in self._styled_rows:
             self.ui.update_compact_field_row(
                 self._styled_rows["size"],
@@ -794,39 +795,52 @@ class UiScalePanel:
                 self._styled_rows["font"],
                 label_width=label_width,
             )
+            self.font_combo.setMinimumWidth(max(41, int(round(54 * scale))))
         if hasattr(self, "hint_widget"):
             self.ui.update_inline_checkbox_row(
                 self.hint_widget,
                 self._tr("no_hinting"),
-                minimum=int(round(_HINT_ROW_MIN_WIDTH * scale)),
-                maximum=int(round(_HINT_ROW_MAX_WIDTH * scale)),
+                minimum=max(66, int(round(_HINT_ROW_MIN_WIDTH * scale))),
+                maximum=max(113, int(round(_HINT_ROW_MAX_WIDTH * scale))),
+                scale=scale,
             )
+        if hasattr(self, "_footer_layout"):
+            footer_margin = max(8, int(round(10 * scale)))
+            self._footer_layout.setContentsMargins(
+                footer_margin, 0, footer_margin, 0
+            )
+            self._footer_layout.setSpacing(max(6, int(round(8 * scale))))
         footer_btn_h = max(20, int(round(26 * scale)))
         if hasattr(self, "reset_btn"):
-            self.ui.set_compact_footer_button_width(
-                self.reset_btn,
+            self.reset_btn.setCompactHeight(footer_btn_h)
+            self.reset_btn.setFixedWidth(
                 self.ui.compact_footer_button_width(
                     self.reset_btn,
-                    minimum=_RESET_BUTTON_WIDTH,
-                    maximum=int(round(118 * scale)),
-                ),
-                height=footer_btn_h,
+                    minimum=max(51, int(round(_RESET_BUTTON_WIDTH * scale))),
+                    maximum=max(89, int(round(118 * scale))),
+                )
             )
         if hasattr(self, "save_btn"):
-            self.ui.set_compact_footer_button_width(
-                self.save_btn,
+            self.save_btn.setCompactHeight(footer_btn_h)
+            self.save_btn.setFixedWidth(
                 self.ui.compact_footer_button_width(
                     self.save_btn,
-                    minimum=_SAVE_BUTTON_WIDTH,
-                    maximum=int(round(112 * scale)),
-                ),
-                height=footer_btn_h,
+                    minimum=max(54, int(round(_SAVE_BUTTON_WIDTH * scale))),
+                    maximum=max(84, int(round(112 * scale))),
+                )
             )
 
         self.widget.setMinimumWidth(0)
         self.widget.setMinimumHeight(0)
         try:
             self.widget.updateGeometry()
+            for layout in (
+                self._main_layout,
+                self._card_layout,
+                self.widget.layout(),
+            ):
+                layout.invalidate()
+                layout.activate()
         except Exception:
             pass
         hint_w = self.widget.minimumSizeHint().width()

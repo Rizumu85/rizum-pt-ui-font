@@ -13,6 +13,8 @@ SIBLING_OVERRIDE_ENV = "RIZUM_UI_FONT_USE_SIBLING_PRETTIER"
 
 REQUIRED_UI_KIT_FEATURES = (
     "ActionButton",
+    "AnimatedSaveButton",
+    "SecondaryActionButton",
     "apply_compact_dock_surface",
     "apply_theme",
     "compact_footer_button_width",
