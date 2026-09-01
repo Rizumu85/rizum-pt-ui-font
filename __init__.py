@@ -190,6 +190,8 @@ class UiScalePanel:
 
         self.ui.apply_theme(self.widget, mode="overlay")
         self.ui.apply_compact_dock_surface(self.widget)
+        # Painter restores docks by objectName; each plugin must own a stable identity.
+        self.widget.setObjectName("RizumUiFontDockSurface")
         layout = self.ui.make_compact_dock_layout(self.widget)
 
         card = self.ui.make_compact_dock_card()
@@ -883,6 +885,7 @@ def start_plugin():
     _STARTUP_VISIBILITY_SETTLING = not _STARTUP_PANEL_VISIBLE
     _PANEL.widget.setUpdatesEnabled(False)
     _DOCK = sp.ui.add_dock_widget(_PANEL.widget)
+    _DOCK.setObjectName("RizumUiFontDock")
     _DOCK.hide()
     _DOCK.setWindowTitle(_PANEL._tr("panel_title"))
     _connect_floating_resize()
@@ -1246,8 +1249,8 @@ def _build_panel_font_override(font):
     return f"""
 QWidget#RizumSurface,
 QWidget#RizumSurface *,
-QWidget#RizumCompactDockSurface,
-QWidget#RizumCompactDockSurface *,
+QWidget#RizumUiFontDockSurface,
+QWidget#RizumUiFontDockSurface *,
 QMenu#RizumPopupMenu {{
     font-family: "{family}", Arial, sans-serif;
 }}
