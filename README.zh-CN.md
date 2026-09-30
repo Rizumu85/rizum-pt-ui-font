@@ -9,8 +9,6 @@
   <img src="assets/readme/hero.png" width="100%" alt="Rizum UI Font 横幅：在 Painter 中调整字体和字号，面板展示 MiSans、1.10 字号比例，以及撤销、重置和保存控件。">
 </p>
 
-<p align="center"><sub>从当前插件代码在 Painter 外渲染的真实面板，使用 MiSans 和 1.10 字号比例。</sub></p>
-
 ## 界面
 
 - **字号**：调整界面字体比例。
