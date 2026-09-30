@@ -8,8 +8,6 @@ Adjust Adobe Substance 3D Painter's interface font, preview changes live, and sa
   <img src="assets/readme/hero.png" width="100%" alt="Rizum UI Font: set your font and size in Painter. The plugin panel shows MiSans at 1.10 scale with undo, Reset, and Save.">
 </p>
 
-<p align="center"><sub>Actual plugin panel rendered outside Painter. MiSans at 1.10 scale.</sub></p>
-
 ## Panel
 
 - **Size** — adjust the interface font scale.
