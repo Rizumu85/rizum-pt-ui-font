@@ -38,7 +38,23 @@ def main():
         panel.widget.show()
         app.processEvents()
         destination = ROOT / "assets" / "readme" / "panel.png"
-        if not panel.widget.grab().save(str(destination)):
+        card = panel._card_layout.parentWidget()
+        ratio = card.devicePixelRatioF()
+        capture = QtGui.QImage(
+            round(card.width() * ratio), round(card.height() * ratio),
+            QtGui.QImage.Format.Format_ARGB32_Premultiplied,
+        )
+        capture.setDevicePixelRatio(ratio)
+        capture.fill(QtCore.Qt.GlobalColor.transparent)
+        painter = QtGui.QPainter(capture)
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        mask = QtGui.QPainterPath()
+        radius = panel.ui.components.COMPACT_DOCK_CARD_RADIUS
+        mask.addRoundedRect(QtCore.QRectF(card.rect()), radius, radius)
+        painter.setClipPath(mask)
+        card.render(painter, QtCore.QPoint())
+        painter.end()
+        if not capture.save(str(destination)):
             raise RuntimeError("Could not save panel capture")
         print(f"Captured actual panel: {destination}")
         panel.close()
