@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1200" height="420" viewBox="0 0 1200 420" role="img" aria-labelledby="title description">
+  <title id="title">Rizum Painter UI Font</title>
+  <desc id="description">Live font sizing and font selection for Substance 3D Painter, illustrated by the plugin panel.</desc>
+  <rect width="1200" height="420" fill="#202020"/>
+  <g font-family="Segoe UI, sans-serif">
+    <text x="56" y="78" font-size="20" fill="#a5cb75">SUBSTANCE 3D PAINTER</text>
+    <text x="52" y="182" font-size="72" font-weight="600" fill="#f5f5f5">Rizum UI Font</text>
+    <text x="56" y="244" font-size="28" fill="#e2e2e2">Set your font. Find your size.</text>
+    <text x="56" y="284" font-size="24" fill="#a9a9a9">Preview live. Save when it feels right.</text>
+    <text x="56" y="364" font-size="20" fill="#a9a9a9">SIZE / FONT / HINTING</text>
+  </g>
+  <g id="panel-proof">
+    <image x="616" y="60" width="536" height="302" xlink:href="../panel.png"/>
+  </g>
+</svg>

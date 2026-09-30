@@ -7,7 +7,7 @@
 [下载插件](https://github.com/Rizumu85/rizum-pt-ui-font/releases/latest) · [安装](#安装) · [English](README.md)
 
 <p align="center">
-  <img src="assets/readme/panel.png" width="360" alt="UI Font 面板：字号比例 1.10，MiSans 字体，以及字体渲染、撤销、重置和保存控件">
+  <img src="assets/readme/hero.png" width="100%" alt="Rizum UI Font 横幅：在 Painter 中调整字体和字号，面板展示 MiSans、1.10 字号比例，以及撤销、重置和保存控件。">
 </p>
 
 <p align="center"><sub>从当前插件代码在 Painter 外渲染的真实面板，使用 MiSans 和 1.10 字号比例。</sub></p>

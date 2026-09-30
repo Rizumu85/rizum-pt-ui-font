@@ -7,7 +7,7 @@ Adjust Adobe Substance 3D Painter's interface font, preview changes live, and sa
 [Download](https://github.com/Rizumu85/rizum-pt-ui-font/releases/latest) · [Installation](#installation) · [中文](README.zh-CN.md)
 
 <p align="center">
-  <img src="assets/readme/panel.png" width="360" alt="UI Font panel showing a 1.10 font scale, MiSans font, No hinting, undo, Reset, and Save controls">
+  <img src="assets/readme/hero.png" width="100%" alt="Rizum UI Font: set your font and size in Painter. The plugin panel shows MiSans at 1.10 scale with undo, Reset, and Save.">
 </p>
 
 <p align="center"><sub>Actual plugin panel rendered outside Painter. MiSans at 1.10 scale.</sub></p>
@@ -61,5 +61,7 @@ python distribution.py
 This checks version consistency, bundled UI files, icons, translations, font notices, and cache-file hygiene.
 
 The panel image can be regenerated with `python assets/readme/source/render_panel.py` using PySide6. It uses temporary settings and the bundled UI kit.
+
+The banner uses an editable SVG layout and the panel image. Export it with `python assets/readme/source/render_hero.py`.
 
 </details>
