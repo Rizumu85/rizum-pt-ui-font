@@ -1,8 +1,6 @@
 # Rizum Painter UI Font
 
-**Your font. Your size. Inside Painter.**
-
-Adjust Adobe Substance 3D Painter's interface font, preview changes live, and save the look that works for you. No changes to your system font settings.
+Adjust Adobe Substance 3D Painter's interface font, preview changes live, and save the look that works for you.
 
 [Download](https://github.com/Rizumu85/rizum-pt-ui-font/releases/latest) · [Installation](#installation) · [中文](README.zh-CN.md)
 
@@ -12,14 +10,14 @@ Adjust Adobe Substance 3D Painter's interface font, preview changes live, and sa
 
 <p align="center"><sub>Actual plugin panel rendered outside Painter. MiSans at 1.10 scale.</sub></p>
 
-## A Small Panel, an Easier Read
+## Panel
 
-- **Size** — adjust the interface font scale without changing system settings.
+- **Size** — adjust the interface font scale.
 - **Font** — use bundled MiSans or add your own `.ttf` and `.otf` fonts.
 - **No hinting** — try a different font-rendering preference and judge the result live.
 - **Undo, Reset, Save** — step back, preview Painter's original font, or keep your changes.
 
-Font settings are remembered between sessions. The panel includes its own UI helpers; no separate UI Prettier installation is needed.
+Font settings are remembered between sessions.
 
 ## Installation
 
