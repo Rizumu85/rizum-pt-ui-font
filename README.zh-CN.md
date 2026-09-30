@@ -1,8 +1,7 @@
 # Rizum Painter UI Font
 
-**在 Painter 里，调整适合自己的字体和字号。**
 
-实时预览 Adobe Substance 3D Painter 的界面字体，满意后再保存。不影响系统字体设置。
+实时预览 Adobe Substance 3D Painter 的界面字体并保存。
 
 [下载插件](https://github.com/Rizumu85/rizum-pt-ui-font/releases/latest) · [安装](#安装) · [English](README.md)
 
@@ -12,14 +11,14 @@
 
 <p align="center"><sub>从当前插件代码在 Painter 外渲染的真实面板，使用 MiSans 和 1.10 字号比例。</sub></p>
 
-## 让界面更好读
+## 界面
 
-- **Size（字号）**：调整界面字体比例，不修改系统设置。
-- **Font（字体）**：选择内置 MiSans，也可以添加自己的 `.ttf` 或 `.otf` 字体。
-- **No hinting**：切换字体微调选项，实时比较显示效果。
+- **字号**：调整界面字体比例。
+- **字体**：选择内置 MiSans，也可以添加自己的 `.ttf` 或 `.otf` 字体。
+- **No hinting**：切换字体抗锯齿的渲染效果。
 - **撤销、Reset、Save**：撤销上一步修改、预览 Painter 原始字体，或保存当前效果。
 
-保存的字体设置会在后续会话中继续使用。面板已内置所需 UI 组件，不必另装 UI Prettier。
+保存的字体设置会在后续会话中继续使用。
 
 ## 安装
 
@@ -45,7 +44,7 @@
 
 ## 兼容性与字体授权
 
-插件使用 Painter 的 Qt6 / PySide6 界面，调整的是软件 UI 字体，不修改工程贴图或系统字体设置。面板会跟随 Painter 的界面语言。
+插件使用 Painter 的 Qt6 / PySide6 界面，调整的是软件 UI 字体。
 
 **内置 MiSans。** 字体由小米科技有限责任公司提供，受《MiSans 字体知识产权许可协议》约束。再分发插件时请保留[第三方声明](THIRD_PARTY_NOTICES.md)；字体授权与插件的 MIT 授权分别适用。
 
