@@ -43,7 +43,7 @@ To add a font, click the **folder icon**, place a `.ttf` or `.otf` file in `font
 
 ## Compatibility & Fonts
 
-This plugin uses Painter's Qt6 / PySide6 interface. It adjusts application UI fonts; it does not change project textures or system font preferences. The panel follows Painter's interface language.
+This plugin uses Painter's Qt6 / PySide6 interface. It adjusts application UI fonts; 
 
 **MiSans is included.** Font files are provided by Xiaomi Inc. under the MiSans Font Intellectual Property License Agreement. Keep the bundled [third-party notices](THIRD_PARTY_NOTICES.md) when redistributing the plugin; fonts have separate terms from the plugin's MIT license.
 
