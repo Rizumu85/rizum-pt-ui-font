@@ -11,7 +11,7 @@ Adjust Adobe Substance 3D Painter's interface font, preview changes live, and sa
 ## Panel
 
 - **Size** — adjust the interface font scale.
-- **Font** — use bundled MiSans or add your own `.ttf` and `.otf` fonts.
+- **Font** — use bundled MiSans (Regular, Medium, Bold) or add your own `.ttf` and `.otf` fonts.
 - **No hinting** — try a different font-rendering preference and judge the result live.
 - **Undo, Reset, Save** — step back, preview Painter's original font, or keep your changes.
 
@@ -41,20 +41,21 @@ To add a font, click the **folder icon**, place a `.ttf` or `.otf` file in `font
 
 ## Compatibility & Fonts
 
-This plugin uses Painter's Qt6 / PySide6 interface. It adjusts application UI fonts; 
+This plugin uses Painter's Qt6 / PySide6 interface. It adjusts the application UI font only; document text, viewport overlays, and other plugins' custom fonts are left alone.
 
 **MiSans is included.** Font files are provided by Xiaomi Inc. under the MiSans Font Intellectual Property License Agreement. Keep the bundled [third-party notices](THIRD_PARTY_NOTICES.md) when redistributing the plugin; fonts have separate terms from the plugin's MIT license.
 
 <details>
 <summary><strong>For maintainers: check a release folder</strong></summary>
 
-Run from the plugin directory before packaging:
+Run from the plugin directory:
 
 ```sh
-python distribution.py
+python distribution.py          # validate this checkout
+python distribution.py build    # stage build/rizum-pt-ui-font/, validate it, and zip it
 ```
 
-This checks version consistency, bundled UI files, icons, translations, font notices, and cache-file hygiene.
+Validation checks version consistency, bundled UI files, icons, translations, font notices, and cache-file hygiene. The `build` command copies only the runtime files (no tests, README assets, or the Chinese README) into `build/`, runs the release checks on that folder, and writes `build/rizum-pt-ui-font-<version>.zip`.
 
 The panel image can be regenerated with `python assets/readme/source/render_panel.py` using PySide6. It uses temporary settings and the bundled UI kit.
 

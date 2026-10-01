@@ -40,22 +40,34 @@ class FontCatalog:
     def __init__(self, font_dir, database):
         self.font_dir = Path(font_dir)
         self.database = database
+        self._families = None
 
-    def options(self, system_label):
+    def options(self, system_label, refresh=False):
+        """Return the system-default option followed by each bundled family.
+
+        Families are discovered once and cached, because registering a font
+        file with Qt is not free and is not idempotent; pass ``refresh=True``
+        to rescan the folder (for example after the user added a file).
+        """
         seen = set()
         choices = [FontOption(str(system_label), "")]
-        for family in self._discover_families():
+        for family in self.families(refresh=refresh):
             if family in seen:
                 continue
             seen.add(family)
             choices.append(FontOption(family, family))
         return tuple(choices)
 
+    def families(self, refresh=False):
+        if refresh or self._families is None:
+            self._families = self._discover_families()
+        return self._families
+
     def contains_family(self, family):
         family = str(family or "")
         if not family:
             return True
-        return any(option.family == family for option in self.options(""))
+        return family in self.families()
 
     def _discover_families(self):
         if not self.font_dir.exists():

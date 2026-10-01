@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import sys
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
+
+DISTRIBUTION_NAME = "rizum-pt-ui-font"
 
 REQUIRED_PATHS = (
     ".gitignore",
@@ -80,8 +84,13 @@ class FilesystemAdapter:
         return (path for path in self.root.rglob("*") if path.is_file())
 
 
-def validate_distribution(root=None, fs=None):
-    """Return a report for the plugin's standalone distribution invariants."""
+def validate_distribution(root=None, fs=None, release=False):
+    """Return a report for the plugin's standalone distribution invariants.
+
+    ``release`` enables the checks that only make sense on a staged release
+    folder (for example that development-only files were left out); a source
+    checkout is expected to carry those files.
+    """
     root = Path(root or Path(__file__).resolve().parent).resolve()
     fs = FilesystemAdapter(root) if fs is None else fs
     issues = []
@@ -92,9 +101,58 @@ def validate_distribution(root=None, fs=None):
     _check_vendor_manifest(fs, issues)
     _check_referenced_icons(fs, issues)
     _check_misans_notice(fs, issues)
-    _check_release_hygiene(fs, issues)
+    _check_release_hygiene(fs, issues, release=release)
 
     return DistributionReport(root=root, issues=tuple(issues))
+
+
+def build_distribution(root=None, out_dir=None):
+    """Stage the runtime files into ``build/``, validate them, and zip them.
+
+    Returns ``(report, staged_dir, zip_path)``; ``zip_path`` is ``None`` when
+    the staged folder failed validation.
+    """
+    root = Path(root or Path(__file__).resolve().parent).resolve()
+    out_dir = Path(out_dir) if out_dir is not None else root / "build"
+    staged = out_dir / DISTRIBUTION_NAME
+
+    if staged.exists():
+        shutil.rmtree(staged)
+    staged.mkdir(parents=True)
+
+    def _skip_cache(_directory, names):
+        return [name for name in names if name == "__pycache__" or name.endswith((".pyc", ".pyo"))]
+
+    for relative in REQUIRED_PATHS:
+        source = root / relative
+        if not source.exists():
+            continue
+        target = staged / relative
+        if source.is_dir():
+            shutil.copytree(source, target, ignore=_skip_cache)
+        else:
+            shutil.copy2(source, target)
+
+    report = validate_distribution(staged, release=True)
+    if not report.ok:
+        return report, staged, None
+
+    version = _read_version(root)
+    zip_path = out_dir / f"{DISTRIBUTION_NAME}-{version}.zip" if version else out_dir / f"{DISTRIBUTION_NAME}.zip"
+    if zip_path.exists():
+        zip_path.unlink()
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for path in sorted(staged.rglob("*")):
+            if path.is_file():
+                archive.write(path, Path(DISTRIBUTION_NAME) / path.relative_to(staged))
+    return report, staged, zip_path
+
+
+def _read_version(root):
+    try:
+        return str(json.loads((Path(root) / "plugin.json").read_text(encoding="utf-8")).get("version", ""))
+    except Exception:
+        return ""
 
 
 def _check_required_paths(fs, issues):
@@ -206,9 +264,11 @@ def _check_misans_notice(fs, issues):
         issues.append(DistributionIssue("misans-notice", "Third-party notice does not mention MiSans", "THIRD_PARTY_NOTICES.md"))
 
 
-def _check_release_hygiene(fs, issues):
-    if fs.exists("README.zh-CN.md"):
-        issues.append(DistributionIssue("stale-readme", "Standalone Chinese README should not ship", "README.zh-CN.md"))
+def _check_release_hygiene(fs, issues, release=False):
+    if release:
+        for relative in ("README.zh-CN.md", "tests", "assets"):
+            if fs.exists(relative):
+                issues.append(DistributionIssue("dev-only-file", "Development-only path should not ship", relative))
 
     try:
         gitignore = fs.read_text(".gitignore")
@@ -217,6 +277,10 @@ def _check_release_hygiene(fs, issues):
     if "build/" not in gitignore:
         issues.append(DistributionIssue("gitignore", "build/ is not ignored", ".gitignore"))
 
+    if not release:
+        # A source checkout accumulates __pycache__ as soon as tests run;
+        # only the staged release folder must be free of it.
+        return
     for path in fs.iter_files():
         relative = path.relative_to(fs.root)
         if "__pycache__" in relative.parts or path.suffix == ".pyc":
@@ -224,11 +288,25 @@ def _check_release_hygiene(fs, issues):
 
 
 def main(argv=None):
+    """``distribution.py [ROOT]`` validates; ``distribution.py build [ROOT]`` stages and zips."""
     argv = list(sys.argv[1:] if argv is None else argv)
+    build = bool(argv) and argv[0] == "build"
+    if build:
+        argv = argv[1:]
     root = Path(argv[0]).resolve() if argv else Path(__file__).resolve().parent
-    report = validate_distribution(root)
+
+    if not build:
+        report = validate_distribution(root)
+        print(report.format())
+        return 0 if report.ok else 1
+
+    report, staged, zip_path = build_distribution(root)
     print(report.format())
-    return 0 if report.ok else 1
+    if zip_path is None:
+        return 1
+    print(f"Staged: {staged}")
+    print(f"Zip: {zip_path}")
+    return 0
 
 
 if __name__ == "__main__":

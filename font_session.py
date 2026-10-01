@@ -116,12 +116,6 @@ class FontSession:
     def can_undo(self):
         return self._index > 0
 
-    def saved_state(self):
-        return self.settings.load()
-
-    def saved_needs_apply(self):
-        return not self.saved_state().is_default()
-
     def seed(self, state):
         state = FontState.from_value(state)
         self._history = [state]
@@ -144,9 +138,6 @@ class FontSession:
         self.applier.apply_state(state)
         return state
 
-    def revert_to_saved(self):
-        return self.revert_to(self.saved_state())
-
     def revert_to(self, state, before_apply=None):
         state = FontState.from_value(state)
         if before_apply is not None:
@@ -158,15 +149,6 @@ class FontSession:
     def save(self, state):
         state = self.preview(state)
         self.settings.save(state)
-        return state
-
-    def reset(self, before_apply=None):
-        state = FontState()
-        if before_apply is not None:
-            before_apply(state)
-        self.applier.restore_original()
-        self.settings.save(state)
-        self.seed(state)
         return state
 
     def restore_original(self):

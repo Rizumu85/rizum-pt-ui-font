@@ -96,6 +96,137 @@ class UiScalePanelTests(unittest.TestCase):
         self.assertTrue(panel.save_btn.isDirty())
         self.assertFalse(panel.undo_btn.isEnabled())
 
+    def test_missing_saved_font_does_not_open_dirty(self):
+        self.settings.setValue("font_family", "Font That Was Deleted")
+        self.settings.setValue("scale", 1.0)
+        self.settings.sync()
+
+        with mock.patch.object(QtCore, "QSettings", return_value=self.settings):
+            panel = plugin.UiScalePanel()
+        self.addCleanup(panel.close)
+
+        self.assertEqual(panel.font_combo.currentText(), panel._tr("system_default"))
+        self.assertFalse(panel.save_btn.isDirty())
+        self.assertEqual(panel._saved_state.family, "")
+        # The stored value is left alone so the font comes back once re-added.
+        self.assertEqual(self.settings.value("font_family"), "Font That Was Deleted")
+
+    def test_preview_keeps_other_widgets_own_fonts(self):
+        panel = self.panel
+        bold_label = QtWidgets.QLabel("bold")
+        bold_font = bold_label.font()
+        bold_font.setBold(True)
+        bold_label.setFont(bold_font)
+        self.addCleanup(bold_label.deleteLater)
+        plain_label = QtWidgets.QLabel("plain")
+        self.addCleanup(plain_label.deleteLater)
+        base_size = self.app.font().pointSizeF()
+
+        panel.scale.setValue(1.5)
+        self.app.processEvents()
+        self.assertTrue(bold_label.font().bold())
+        self.assertAlmostEqual(plain_label.font().pointSizeF(), base_size * 1.5, places=2)
+
+        panel.session.restore_original()
+        self.app.processEvents()
+        self.assertTrue(bold_label.font().bold())
+        self.assertAlmostEqual(plain_label.font().pointSizeF(), base_size, places=2)
+
+
+class DockVisibilityTests(unittest.TestCase):
+    """The unsaved preview must survive tab switches and only revert on a real close."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.settings = QtCore.QSettings(
+            os.path.join(self.temp_dir.name, "settings.ini"),
+            QtCore.QSettings.Format.IniFormat,
+        )
+        with mock.patch.object(QtCore, "QSettings", return_value=self.settings):
+            self.panel = plugin.UiScalePanel()
+
+        self.window = QtWidgets.QMainWindow()
+        self.dock = QtWidgets.QDockWidget("UI Font")
+        self.dock.setWidget(self.panel.widget)
+        self.other = QtWidgets.QDockWidget("Other")
+        self.other.setWidget(QtWidgets.QLabel("other"))
+        area = QtCore.Qt.DockWidgetArea.RightDockWidgetArea
+        self.window.addDockWidget(area, self.dock)
+        self.window.addDockWidget(area, self.other)
+        self.window.tabifyDockWidget(self.dock, self.other)
+
+        self._saved_globals = (
+            plugin._PANEL,
+            plugin._DOCK,
+            plugin._STARTUP_SURFACE_READY,
+            plugin._STARTUP_SURFACE_PREPARING,
+            plugin._STARTUP_VISIBILITY_SETTLING,
+        )
+        plugin._PANEL = self.panel
+        plugin._DOCK = self.dock
+        plugin._STARTUP_SURFACE_READY = True
+        plugin._STARTUP_SURFACE_PREPARING = False
+        plugin._STARTUP_VISIBILITY_SETTLING = False
+        plugin._connect_dock_visibility()
+
+        self.window.show()
+        self.dock.raise_()
+        self.app.processEvents()
+
+    def tearDown(self):
+        self.panel.close()
+        self.window.close()
+        self.window.deleteLater()
+        self.app.processEvents()
+        (
+            plugin._PANEL,
+            plugin._DOCK,
+            plugin._STARTUP_SURFACE_READY,
+            plugin._STARTUP_SURFACE_PREPARING,
+            plugin._STARTUP_VISIBILITY_SETTLING,
+        ) = self._saved_globals
+
+    def test_switching_dock_tabs_keeps_the_live_preview(self):
+        self.panel.scale.setValue(1.3)
+        self.app.processEvents()
+
+        self.other.raise_()
+        self.app.processEvents()
+        self.dock.raise_()
+        self.app.processEvents()
+
+        self.assertEqual(self.panel.scale.value(), 1.3)
+        self.assertTrue(self.panel.save_btn.isDirty())
+        self.assertNotEqual(self.settings.value("panel_visible"), "false")
+
+    def test_minimizing_the_window_keeps_the_live_preview(self):
+        self.panel.scale.setValue(1.3)
+        self.app.processEvents()
+
+        self.window.showMinimized()
+        self.app.processEvents()
+        self.window.showNormal()
+        self.app.processEvents()
+
+        self.assertEqual(self.panel.scale.value(), 1.3)
+        self.assertNotEqual(self.settings.value("panel_visible"), "false")
+
+    def test_closing_the_dock_reverts_to_saved_state(self):
+        self.panel.scale.setValue(1.3)
+        self.app.processEvents()
+
+        self.dock.close()
+        self.app.processEvents()
+
+        self.assertEqual(self.panel.scale.value(), 1.0)
+        self.assertFalse(self.panel.save_btn.isDirty())
+        self.assertEqual(plugin._setting_bool(self.settings.value("panel_visible"), True), False)
+
 
 if __name__ == "__main__":
     unittest.main()

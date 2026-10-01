@@ -134,6 +134,15 @@ def _read_painter_log_language():
     return matches[-1] if matches else ""
 
 
+def _log_warning(message):
+    try:
+        import substance_painter as sp
+
+        sp.logging.warning(message)
+    except Exception:
+        print(f"[rizum-pt-ui-font] {message}", file=sys.stderr)
+
+
 def _load_ui_kit():
     """Return the compact UI kit used by the panel."""
     if _load_bundled_ui_kit is None:
@@ -156,7 +165,9 @@ class UiScalePanel:
         self.language = _resolve_language(_read_painter_log_language())
         self.original_font = QtWidgets.QApplication.font()
         self.settings = QSettingsFontSettings(self.store)
-        self._saved_state = self.settings.load()
+        self.font_dir = _PLUGIN_ROOT / "fonts"
+        self.font_catalog = FontCatalog(self.font_dir, QtFontDatabaseAdapter(QtGui))
+        self._saved_state = self._load_saved_state()
         self.session = FontSession(
             self.settings,
             QtFontApplier(
@@ -167,8 +178,6 @@ class UiScalePanel:
                 self._refresh_own_panel_font,
             ),
         )
-        self.font_dir = _PLUGIN_ROOT / "fonts"
-        self.font_catalog = FontCatalog(self.font_dir, QtFontDatabaseAdapter(QtGui))
         self._base_panel_stylesheet = ""
         self._styled_rows = {}
 
@@ -249,7 +258,7 @@ class UiScalePanel:
         self.refresh_btn = self.ui.make_icon_button("refresh.svg", self._tr("refresh_font_list"))
         self._install_compact_tooltip(self.refresh_btn, self._tr("refresh_font_list"))
         self.refresh_btn.setProperty("accent", True)
-        self.refresh_btn.clicked.connect(self._populate_fonts)
+        self.refresh_btn.clicked.connect(lambda *_: self._populate_fonts(refresh=True))
         icon_group.addWidget(self.browse_btn)
         icon_group.addWidget(self.refresh_btn)
         tool_row.addLayout(icon_group)
@@ -273,7 +282,6 @@ class UiScalePanel:
         footer.setObjectName("RizumTransparent")
         self._footer = footer
         footer.setFixedHeight(48)
-        self._footer = footer
         footer_outer = QtWidgets.QVBoxLayout(footer)
         footer_outer.setContentsMargins(0, 0, 0, 0)
         footer_outer.setSpacing(0)
@@ -373,7 +381,7 @@ class UiScalePanel:
             self._tr("refresh_font_list"),
         )
         self.refresh_btn.setToolTip(self._tr("refresh_font_list"))
-        self.refresh_btn.clicked.connect(self._populate_fonts)
+        self.refresh_btn.clicked.connect(lambda *_: self._populate_fonts(refresh=True))
         actions_row.addWidget(self.refresh_btn)
         actions_row.addStretch(1)
         layout.addLayout(actions_row)
@@ -410,11 +418,11 @@ class UiScalePanel:
         btn_row.addWidget(self.save_btn)
         layout.addLayout(btn_row)
 
-    def _populate_fonts(self):
+    def _populate_fonts(self, refresh=False):
         self.font_combo.blockSignals(True)
         try:
             self.font_combo.clear()
-            for option in self.font_catalog.options(self._tr("system_default")):
+            for option in self.font_catalog.options(self._tr("system_default"), refresh=refresh):
                 self.font_combo.addItem(option.label, option.family or None)
 
             saved_family = self._saved_state.family
@@ -544,9 +552,25 @@ class UiScalePanel:
             return
         self._update_undo_enabled()
 
+    def _load_saved_state(self):
+        """Load the persisted state, ignoring a font that is no longer bundled.
+
+        The stored family is kept on disk so it comes back once the font file
+        is restored, but the live session treats it as the system default so
+        the panel does not open dirty or apply a font Qt cannot find.
+        """
+        state = self.settings.load()
+        if state.family and not self.font_catalog.contains_family(state.family):
+            _log_warning(
+                f"Saved UI font '{state.family}' was not found in {self.font_dir}; "
+                "using the system default until it is added back."
+            )
+            state = FontState(scale=state.scale, family="", hinting=state.hinting)
+        return state
+
     def _revert_to_saved(self):
         """Discard unsaved live preview, restore to last saved state."""
-        self._saved_state = self.session.saved_state()
+        self._saved_state = self._load_saved_state()
         self._set_controls(self._saved_state)
         self.session.revert_to(self._current_state())
         self._update_undo_enabled()
@@ -614,7 +638,7 @@ class UiScalePanel:
         self.store.sync()
 
     def apply_saved_if_needed(self):
-        if self.session.saved_needs_apply():
+        if not self._saved_state.is_default():
             self._apply_font()
 
     def _tr(self, key):
@@ -923,8 +947,6 @@ def close_plugin():
     if _DOCK is not None:
         sp.ui.delete_ui_element(_DOCK)
         _DOCK = None
-    _STARTUP_SURFACE_READY = False
-    _STARTUP_SURFACE_PREPARING = False
     sp.logging.info(_TEXT.get(language, _TEXT[_DEFAULT_LANGUAGE])["unloaded"])
 def _connect_floating_resize():
     try:
@@ -1105,23 +1127,28 @@ def _on_dock_visibility_changed(visible):
     if _PANEL is None or not _is_qt_object_alive(_PANEL.widget):
         return
 
+    # QDockWidget also emits visibilityChanged(False) when the dock is
+    # tabbed behind another dock or the main window is minimized. Only an
+    # explicit hide (close button, View menu, toggle action) marks the dock
+    # hidden, and only that should discard the unsaved preview.
+    if visible:
+        closed = False
+    else:
+        try:
+            closed = bool(_DOCK.isHidden())
+        except Exception:
+            closed = True
+        if not closed:
+            return
+
     if (
         _STARTUP_SURFACE_READY
         and not _STARTUP_SURFACE_PREPARING
         and not _STARTUP_VISIBILITY_SETTLING
     ):
-        try:
-            user_changed_visibility = (
-                visible
-                or _DOCK.isFloating()
-                or not _DOCK.toggleViewAction().isChecked()
-            )
-        except Exception:
-            user_changed_visibility = True
-        if user_changed_visibility:
-            _PANEL.save_panel_visibility(visible)
+        _PANEL.save_panel_visibility(visible)
 
-    if not visible:
+    if closed:
         _PANEL._revert_to_saved()
 
 def _on_dock_toggle_requested(visible):
@@ -1189,26 +1216,40 @@ def _resize_floating_dock_later():
 
 
 def _refresh_widget_font(widget, font):
+    """Relayout a host widget after the application font changed.
+
+    QApplication.setFont already propagates the new font to every widget
+    that has not set its own; calling setFont here would also overwrite
+    fonts Painter's widgets chose themselves (bold headers, monospace
+    fields) and that damage would survive restore_original().
+    """
     if not _is_qt_object_alive(widget):
-        return
-    try:
-        widget.setFont(font)
-    except Exception:
         return
     try:
         widget.updateGeometry()
     except Exception:
         pass
     try:
-        widget.repaint()
+        widget.update()
     except Exception:
         pass
 
 
+def _set_widget_font(widget, font):
+    if not _is_qt_object_alive(widget):
+        return
+    try:
+        widget.setFont(font)
+    except Exception:
+        return
+    _refresh_widget_font(widget, font)
+
+
 def _refresh_widget_tree_font(root, font):
+    """Force the plugin's own panel widgets onto the preview font."""
     if not _is_qt_object_alive(root):
         return
-    _refresh_widget_font(root, font)
+    _set_widget_font(root, font)
     try:
         from PySide6 import QtWidgets
 
@@ -1216,7 +1257,7 @@ def _refresh_widget_tree_font(root, font):
     except Exception:
         children = []
     for child in children:
-        _refresh_widget_font(child, font)
+        _set_widget_font(child, font)
 
 
 def _is_qt_object_alive(obj):
