@@ -96,6 +96,15 @@ class UiScalePanelTests(unittest.TestCase):
         self.assertTrue(panel.save_btn.isDirty())
         self.assertFalse(panel.undo_btn.isEnabled())
 
+    def test_first_run_until_visibility_is_recorded(self):
+        self.assertTrue(self.panel.is_first_run())
+        self.assertTrue(self.panel.panel_should_start_visible())
+
+        self.panel.save_panel_visibility(False)
+
+        self.assertFalse(self.panel.is_first_run())
+        self.assertFalse(self.panel.panel_should_start_visible())
+
     def test_missing_saved_font_does_not_open_dirty(self):
         self.settings.setValue("font_family", "Font That Was Deleted")
         self.settings.setValue("scale", 1.0)

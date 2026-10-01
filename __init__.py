@@ -31,6 +31,7 @@ _STARTUP_SURFACE_READY = False
 _STARTUP_SURFACE_PREPARING = False
 _STARTUP_VISIBILITY_SETTLING = False
 _STARTUP_PANEL_VISIBLE = True
+_STARTUP_FIRST_RUN = False
 _GUI_READY_PROPERTY = "rizumUiFontGuiReady"
 _PANEL_VISIBLE_SETTING = "panel_visible"
 PLUGIN_VERSION = "0.5.1"
@@ -627,6 +628,10 @@ class UiScalePanel:
         self.session.restore_original()
         self._styled_rows.clear()
 
+    def is_first_run(self):
+        """True until the panel's visibility has been recorded once."""
+        return not self.store.contains(_PANEL_VISIBLE_SETTING)
+
     def panel_should_start_visible(self):
         return _setting_bool(
             self.store.value(_PANEL_VISIBLE_SETTING, True),
@@ -901,11 +906,12 @@ def start_plugin():
     import substance_painter as sp
 
     global _DOCK, _PANEL, _STARTUP_SURFACE_READY, _STARTUP_SURFACE_PREPARING
-    global _STARTUP_VISIBILITY_SETTLING, _STARTUP_PANEL_VISIBLE
+    global _STARTUP_VISIBILITY_SETTLING, _STARTUP_PANEL_VISIBLE, _STARTUP_FIRST_RUN
     _STARTUP_SURFACE_READY = False
     _STARTUP_SURFACE_PREPARING = False
     _PANEL = UiScalePanel()
-    _STARTUP_PANEL_VISIBLE = _PANEL.panel_should_start_visible()
+    _STARTUP_FIRST_RUN = _PANEL.is_first_run()
+    _STARTUP_PANEL_VISIBLE = _STARTUP_FIRST_RUN or _PANEL.panel_should_start_visible()
     _STARTUP_VISIBILITY_SETTLING = not _STARTUP_PANEL_VISIBLE
     _PANEL.widget.setUpdatesEnabled(False)
     _DOCK = sp.ui.add_dock_widget(_PANEL.widget)
@@ -914,7 +920,9 @@ def start_plugin():
     _DOCK.setWindowTitle(_PANEL._tr("panel_title"))
     _connect_floating_resize()
     _connect_dock_visibility()
-    if _gui_ready_marked():
+    if _gui_ready_marked() or _host_window_visible():
+        # Enabled from the Python menu: Painter is already up, so show the
+        # panel now instead of waiting for the fallback timer.
         _finalize_startup_surface()
     else:
         _connect_gui_ready_refresh()
@@ -935,11 +943,12 @@ def close_plugin():
     import substance_painter as sp
 
     global _DOCK, _PANEL, _STARTUP_SURFACE_READY, _STARTUP_SURFACE_PREPARING
-    global _STARTUP_VISIBILITY_SETTLING
+    global _STARTUP_VISIBILITY_SETTLING, _STARTUP_FIRST_RUN
     language = _PANEL.language if _PANEL is not None else _DEFAULT_LANGUAGE
     _STARTUP_SURFACE_READY = False
     _STARTUP_SURFACE_PREPARING = False
     _STARTUP_VISIBILITY_SETTLING = False
+    _STARTUP_FIRST_RUN = False
     _disconnect_gui_ready_refresh()
     if _PANEL is not None:
         _PANEL.close()
@@ -1003,6 +1012,16 @@ def _on_gui_ready(_event):
     # font and stylesheet cannot overwrite the restored component metrics.
     _PANEL.QtCore.QTimer.singleShot(0, _finalize_startup_surface)
     _disconnect_gui_ready_refresh()
+
+
+def _host_window_visible():
+    try:
+        import substance_painter as sp
+
+        window = sp.ui.get_main_window()
+        return window is not None and bool(window.isVisible())
+    except Exception:
+        return False
 
 
 def _gui_ready_marked():
@@ -1084,6 +1103,25 @@ def _commit_startup_reveal():
     _STARTUP_SURFACE_READY = True
     _STARTUP_SURFACE_PREPARING = False
     _disconnect_gui_ready_refresh()
+    if _STARTUP_FIRST_RUN:
+        _reveal_first_run_dock()
+
+
+def _reveal_first_run_dock():
+    """Bring the panel forward the first time the plugin is enabled.
+
+    Painter may tab the new dock behind another one; on first run the user
+    would see no change at all. Later runs follow the saved visibility.
+    """
+    global _STARTUP_FIRST_RUN
+    _STARTUP_FIRST_RUN = False
+    try:
+        _DOCK.raise_()
+        _DOCK.activateWindow()
+    except Exception:
+        pass
+    if _PANEL is not None and _is_qt_object_alive(_PANEL.widget):
+        _PANEL.save_panel_visibility(True)
 
 
 def _startup_surface_is_alive():
