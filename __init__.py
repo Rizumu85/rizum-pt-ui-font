@@ -174,7 +174,7 @@ class UiScalePanel:
                 QtGui,
                 QtWidgets,
                 self.original_font,
-                _refresh_widget_font,
+                _set_widget_font,
                 self._refresh_own_panel_font,
             ),
         )
@@ -1216,13 +1216,7 @@ def _resize_floating_dock_later():
 
 
 def _refresh_widget_font(widget, font):
-    """Relayout a host widget after the application font changed.
-
-    QApplication.setFont already propagates the new font to every widget
-    that has not set its own; calling setFont here would also overwrite
-    fonts Painter's widgets chose themselves (bold headers, monospace
-    fields) and that damage would survive restore_original().
-    """
+    """Relayout a widget after its font changed."""
     if not _is_qt_object_alive(widget):
         return
     try:

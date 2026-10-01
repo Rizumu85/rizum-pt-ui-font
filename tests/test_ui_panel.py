@@ -7,7 +7,7 @@ from unittest import mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6 import QtCore, QtTest, QtWidgets
+from PySide6 import QtCore, QtGui, QtTest, QtWidgets
 
 import __init__ as plugin
 
@@ -131,6 +131,66 @@ class UiScalePanelTests(unittest.TestCase):
         self.app.processEvents()
         self.assertTrue(bold_label.font().bold())
         self.assertAlmostEqual(plain_label.font().pointSizeF(), base_size, places=2)
+
+    def test_preview_keeps_a_softened_size_hierarchy(self):
+        panel = self.panel
+        small = QtWidgets.QLabel("small")
+        self.addCleanup(small.deleteLater)
+        small_font = QtGui.QFont(small.font())
+        small_font.setPointSizeF(self.app.font().pointSizeF() * 0.8)
+        small.setFont(small_font)
+        mono = QtWidgets.QLabel("mono")
+        self.addCleanup(mono.deleteLater)
+        mono_font = QtGui.QFont("Courier New")
+        mono_font.setStyleHint(QtGui.QFont.StyleHint.TypeWriter)
+        mono.setFont(mono_font)
+        mono_family = mono.font().family()
+        caps = QtWidgets.QLabel("caps")
+        self.addCleanup(caps.deleteLater)
+        caps_font = QtGui.QFont(caps.font())
+        caps_font.setCapitalization(QtGui.QFont.Capitalization.AllUppercase)
+        caps.setFont(caps_font)
+        base_size = panel.original_font.pointSizeF()
+
+        panel.scale.setValue(1.25)
+        self.app.processEvents()
+        # 0.8x of the base keeps half its difference: sqrt(0.8) ~= 0.894x.
+        self.assertAlmostEqual(
+            small.font().pointSizeF(), base_size * 1.25 * 0.8 ** 0.5, delta=0.05
+        )
+        self.assertEqual(mono.font().family(), mono_family)
+        self.assertEqual(
+            caps.font().capitalization(), QtGui.QFont.Capitalization.AllUppercase
+        )
+
+        panel.session.restore_original()
+        self.app.processEvents()
+        self.assertAlmostEqual(small.font().pointSizeF(), small_font.pointSizeF(), places=2)
+
+    def test_preview_reaches_widgets_under_an_explicit_host_font(self):
+        # Painter sets fonts on its own windows, which blocks QApplication.setFont.
+        panel = self.panel
+        window = QtWidgets.QWidget()
+        self.addCleanup(window.deleteLater)
+        window.setFont(QtGui.QFont(self.app.font()))
+        child = QtWidgets.QLabel("child", window)
+        base_size = window.font().pointSizeF()
+
+        panel.scale.setValue(1.5)
+        self.app.processEvents()
+        self.assertAlmostEqual(window.font().pointSizeF(), base_size * 1.5, places=2)
+        self.assertAlmostEqual(child.font().pointSizeF(), base_size * 1.5, places=2)
+
+        late = QtWidgets.QLabel("late")
+        self.addCleanup(late.deleteLater)
+        panel.scale.setValue(1.6)
+        self.app.processEvents()
+        self.assertAlmostEqual(late.font().pointSizeF(), base_size * 1.6, places=2)
+
+        panel.session.restore_original()
+        self.app.processEvents()
+        self.assertAlmostEqual(window.font().pointSizeF(), base_size, places=2)
+        self.assertAlmostEqual(late.font().pointSizeF(), base_size, places=2)
 
 
 class DockVisibilityTests(unittest.TestCase):
