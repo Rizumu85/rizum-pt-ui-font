@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 _UI_SCALE_PROPERTY = "rizumUiFontScale"
 _BASELINE_FONT_PROPERTY = "rizumUiFontBaseline"
+_TARGET_FONT_PROPERTY = "rizumUiFontTarget"
 # How much of a widget's own size difference from the application font
 # survives a preview: 0 makes every widget the same size (0.5.0), 1 keeps
 # Painter's ratios unchanged. The user chose 1.0 scale to mean "Painter's
@@ -30,6 +31,13 @@ class FontState:
     def from_value(cls, value):
         if isinstance(value, cls):
             return value
+        if hasattr(value, "scale") and hasattr(value, "family"):
+            # A state from a reloaded copy of this module (plugin reload).
+            return cls(
+                scale=_coerce_float(getattr(value, "scale", 1.0), 1.0),
+                family=str(getattr(value, "family", "") or ""),
+                hinting=_coerce_bool(getattr(value, "hinting", True)),
+            )
         value = value or {}
         return cls(
             scale=_coerce_float(value.get("scale", 1.0), 1.0),
@@ -72,6 +80,9 @@ class QtFontApplier:
         self.refresh_widget = refresh_widget
         self.refresh_panel = refresh_panel
         self._applied_state = FontState()
+        # True while this applier is setting fonts, so the live watcher can
+        # tell its own FontChange events from Painter's.
+        self.applying = False
 
     def build_font(self, state):
         state = FontState.from_value(state)
@@ -98,11 +109,45 @@ class QtFontApplier:
     def restore_original(self):
         return self.apply_font(self.original_font, FontState())
 
-    def reapply(self):
-        """Apply the current state again to reach widgets created since."""
-        if self._applied_state.is_default():
+    def apply_to_widget(self, widget):
+        """Bring one widget onto the live state (shown after the last apply)."""
+        state = self._applied_state
+        if state.is_default():
             return False
-        return self.apply_state(self._applied_state)
+        try:
+            target = widget.property(_TARGET_FONT_PROPERTY)
+            if isinstance(target, self.QtGui.QFont) and widget.font() == target:
+                return False
+        except Exception:
+            return False
+        baseline = self._baseline(widget)
+        if baseline is None:
+            return False
+        self.applying = True
+        try:
+            self._apply_widget(widget, baseline, state, self.build_font(state), None)
+        finally:
+            self.applying = False
+        return True
+
+    def widget_font_changed(self, widget):
+        """Painter changed a widget's font (a repolish resets it); re-apply."""
+        if self.applying:
+            return False
+        try:
+            current = widget.font()
+            target = widget.property(_TARGET_FONT_PROPERTY)
+        except Exception:
+            return False
+        if isinstance(target, self.QtGui.QFont) and current == target:
+            return False
+        # The new font is Painter's own; it becomes the widget's baseline.
+        try:
+            widget.setProperty(_BASELINE_FONT_PROPERTY, None)
+            widget.setProperty(_TARGET_FONT_PROPERTY, None)
+        except Exception:
+            return False
+        return self.apply_to_widget(widget)
 
     def apply_font(self, font, state):
         """Apply ``font`` to the application and every existing widget.
@@ -118,22 +163,31 @@ class QtFontApplier:
         # Record baselines before setFont propagates into inheriting widgets.
         baselines = [self._baseline(widget) for widget in widgets]
         _set_application_scale(app, state.scale)
-        app.setFont(font)
-        menu_state = _menu_state(state)
-        menu_font = self.build_font(menu_state)
-        for widget, baseline in zip(widgets, baselines):
-            if self._is_menu(widget):
-                widget_state, applied_font = menu_state, menu_font
-            else:
-                widget_state, applied_font = state, font
-            if baseline is None:
-                widget_font = applied_font
-            else:
-                widget_font = self._widget_font(applied_font, baseline, widget_state)
-            self.refresh_widget(widget, widget_font)
-        self._applied_state = state
-        self.refresh_panel(font)
+        self.applying = True
+        try:
+            app.setFont(font)
+            menu_font = self.build_font(_menu_state(state))
+            for widget, baseline in zip(widgets, baselines):
+                if baseline is None:
+                    self.refresh_widget(widget, menu_font if self._is_menu(widget) else font)
+                else:
+                    self._apply_widget(widget, baseline, state, font, menu_font)
+            self._applied_state = state
+            self.refresh_panel(font)
+        finally:
+            self.applying = False
         return True
+
+    def _apply_widget(self, widget, baseline, state, font, menu_font):
+        if self._is_menu(widget):
+            state = _menu_state(state)
+            font = menu_font if menu_font is not None else self.build_font(state)
+        widget_font = self._widget_font(font, baseline, state)
+        try:
+            widget.setProperty(_TARGET_FONT_PROPERTY, self.QtGui.QFont(widget_font))
+        except Exception:
+            pass
+        self.refresh_widget(widget, widget_font)
 
     def _baseline(self, widget):
         """Return the widget's font as it would be with no preview applied."""
@@ -150,9 +204,8 @@ class QtFontApplier:
         # A widget first seen while a preview is active may inherit the
         # preview font; undo that so the next apply does not compound it.
         # Widgets sized by Painter's stylesheet are still at their own size.
+        # (Menus included: a new menu inherits the plain application font.)
         applied = self._applied_state
-        if self._is_menu(widget):
-            applied = _menu_state(applied)
         if applied.scale and applied.scale != 1.0 and self._inherits_applied(baseline, applied):
             _scale_font(baseline, 1.0 / applied.scale)
         if applied.family and baseline.family() == applied.family:
@@ -319,9 +372,6 @@ class FontSession:
 
     def restore_original(self):
         return self.applier.restore_original()
-
-    def reapply(self):
-        return self.applier.reapply()
 
     def _record(self, state):
         if self._history and self._history[self._index] == state:

@@ -197,8 +197,9 @@ class UiScalePanelTests(unittest.TestCase):
             small.font().pointSizeF(), base_size * 1.125 * 0.8 ** 0.75, delta=0.05
         )
 
-    def test_reapply_reaches_widgets_built_after_the_preview(self):
-        # Painter builds panels after startup and after a project opens.
+    def test_widgets_shown_after_the_preview_appear_on_the_live_font(self):
+        # Painter builds panels after startup and after a project opens; the
+        # Show event reaches them before their first paint.
         panel = self.panel
         applier = panel.session.applier
         panel.session.preview(plugin.FontState(scale=1.25, family="MiSans"))
@@ -213,23 +214,67 @@ class UiScalePanelTests(unittest.TestCase):
         # Inherits the application font, which already carries the preview.
         inherited = QtWidgets.QLabel("inherited")
         self.addCleanup(inherited.deleteLater)
+        window = QtWidgets.QMainWindow()
+        self.addCleanup(window.deleteLater)
+        menu_bar = window.menuBar()
 
-        panel.session.reapply()
+        styled.show()
+        inherited.show()
+        window.show()
 
         expected = base_pt * 1.25 * applier._size_factor(styled_font, 1.25)
         self.assertAlmostEqual(styled.font().pointSizeF(), expected, delta=0.05)
+        self.assertEqual(styled.font().family(), "MiSans")
         self.assertAlmostEqual(inherited.font().pointSizeF(), base_pt * 1.25, delta=0.05)
+        menu_scale = 1.0 + 0.25 * 1.25
+        self.assertAlmostEqual(menu_bar.font().pointSizeF(), base_pt * menu_scale, delta=0.05)
 
-        panel.session.reapply()
+        # Showing again or changing nothing does not compound the scale.
+        styled.hide()
+        styled.show()
         self.assertAlmostEqual(styled.font().pointSizeF(), expected, delta=0.05)
-        self.assertEqual(applier._applied_state.scale, 1.25)
 
-    def test_scheduled_reapply_stops_when_the_panel_closes(self):
+        panel.session.restore_original()
+        self.assertAlmostEqual(styled.font().pointSizeF(), base_pt * 0.8, delta=0.05)
+
+    def test_host_repolish_is_corrected_without_a_loop(self):
+        # Painter's QWidget { font-size } rule comes back on every repolish.
+        host_qss = "QLabel { font-size: 11px; }"
+        saved_qss = self.app.styleSheet()
+        self.app.setStyleSheet(host_qss)
+        self.addCleanup(self.app.setStyleSheet, saved_qss)
         panel = self.panel
-        panel.schedule_reapply(10000)
-        self.assertTrue(panel._reapply_timer.isActive())
+        panel.session.preview(plugin.FontState(scale=1.25, family="MiSans"))
+
+        label = QtWidgets.QLabel("late")
+        self.addCleanup(label.deleteLater)
+        label.show()
+        scaled = QtGui.QFontInfo(label.font()).pixelSize()
+        self.assertGreater(scaled, 11)
+
+        label.style().unpolish(label)
+        label.style().polish(label)
+        self.assertEqual(QtGui.QFontInfo(label.font()).pixelSize(), scaled)
+
+        # A font Painter sets itself becomes the new baseline, traits kept.
+        bold = QtGui.QFont(label.font())
+        bold.setBold(True)
+        label.setFont(bold)
+        self.assertTrue(label.font().bold())
+        self.assertEqual(label.font().family(), "MiSans")
+
+    def test_closing_the_panel_stops_watching_new_widgets(self):
+        panel = self.panel
+        panel.session.preview(plugin.FontState(scale=1.25, family="MiSans"))
+        base_pt = panel.original_font.pointSizeF()
         panel.close()
-        self.assertFalse(panel._reapply_timer.isActive())
+
+        label = QtWidgets.QLabel("after close")
+        self.addCleanup(label.deleteLater)
+        label.show()
+        self.assertAlmostEqual(label.font().pointSizeF(), base_pt, delta=0.05)
+        self.assertNotEqual(label.font().family(), "MiSans")
+
 
     def test_menus_scale_ahead_of_the_rest(self):
         # The user wants menus at 1.25 while the rest of the UI is at 1.20.
