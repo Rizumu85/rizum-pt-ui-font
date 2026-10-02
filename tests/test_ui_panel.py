@@ -197,6 +197,28 @@ class UiScalePanelTests(unittest.TestCase):
             small.font().pointSizeF(), base_size * 1.125 * 0.8 ** 0.75, delta=0.05
         )
 
+    def test_menus_scale_ahead_of_the_rest(self):
+        # The user wants menus at 1.25 while the rest of the UI is at 1.20.
+        panel = self.panel
+        window = QtWidgets.QMainWindow()
+        self.addCleanup(window.deleteLater)
+        menu_bar = window.menuBar()
+        menu = menu_bar.addMenu("File")
+        label = QtWidgets.QLabel("rest")
+        self.addCleanup(label.deleteLater)
+
+        panel.session.preview(plugin.FontState(scale=1.25, family="MiSans"))
+        rest_at_125 = label.font().pointSizeF()
+        panel.session.preview(plugin.FontState(scale=1.2, family="MiSans"))
+        self.assertAlmostEqual(menu_bar.font().pointSizeF(), rest_at_125, delta=0.05)
+        self.assertAlmostEqual(menu.font().pointSizeF(), rest_at_125, delta=0.05)
+        self.assertLess(label.font().pointSizeF(), rest_at_125 - 0.2)
+
+        panel.session.restore_original()
+        self.assertAlmostEqual(
+            menu_bar.font().pointSizeF(), label.font().pointSizeF(), delta=0.05
+        )
+
     def test_preview_keeps_painter_dock_title_style(self):
         panel = self.panel
         dock = QtWidgets.QDockWidget("UI Font")

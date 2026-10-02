@@ -15,6 +15,9 @@ _HIERARCHY_STRENGTH = 0.5
 _HIERARCHY_RAMP = 0.25
 _MIN_SIZE_RATIO = 0.6
 _MAX_SIZE_RATIO = 1.8
+# The user wants the menu bar and its menus at 1.25 while the rest of the UI
+# is at 1.20, so menus move 25% further from 1.0 than the chosen scale.
+_MENU_SCALE_GAIN = 1.25
 
 
 @dataclass(frozen=True)
@@ -110,8 +113,17 @@ class QtFontApplier:
         baselines = [self._baseline(widget) for widget in widgets]
         _set_application_scale(app, state.scale)
         app.setFont(font)
+        menu_state = _menu_state(state)
+        menu_font = self.build_font(menu_state)
         for widget, baseline in zip(widgets, baselines):
-            widget_font = font if baseline is None else self._widget_font(font, baseline, state)
+            if self._is_menu(widget):
+                widget_state, applied_font = menu_state, menu_font
+            else:
+                widget_state, applied_font = state, font
+            if baseline is None:
+                widget_font = applied_font
+            else:
+                widget_font = self._widget_font(applied_font, baseline, widget_state)
             self.refresh_widget(widget, widget_font)
         self._applied_state = state
         self.refresh_panel(font)
@@ -132,6 +144,8 @@ class QtFontApplier:
         # A widget first seen while a preview is active already carries the
         # preview font; undo it so the next apply does not compound it.
         applied = self._applied_state
+        if self._is_menu(widget):
+            applied = _menu_state(applied)
         if applied.scale and applied.scale != 1.0:
             _scale_font(baseline, 1.0 / applied.scale)
         if applied.family and baseline.family() == applied.family:
@@ -196,6 +210,15 @@ class QtFontApplier:
         except Exception:
             return 0.0
 
+    def _is_menu(self, widget):
+        menu_types = tuple(
+            cls for cls in (
+                getattr(self.QtWidgets, "QMenuBar", None),
+                getattr(self.QtWidgets, "QMenu", None),
+            ) if isinstance(cls, type)
+        )
+        return bool(menu_types) and isinstance(widget, menu_types)
+
     def _is_monospace(self, font):
         QFont = self.QtGui.QFont
         try:
@@ -208,6 +231,12 @@ class QtFontApplier:
             return bool(self.QtGui.QFontInfo(font).fixedPitch())
         except Exception:
             return False
+
+
+def _menu_state(state):
+    """Menus grow faster than the rest of the UI (user preference)."""
+    scale = 1.0 + (state.scale - 1.0) * _MENU_SCALE_GAIN
+    return FontState(scale=scale, family=state.family, hinting=state.hinting)
 
 
 def _scale_font(font, scale):
