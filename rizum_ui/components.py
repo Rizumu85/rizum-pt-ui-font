@@ -14,6 +14,10 @@ COMPACT_DOCK_DEFAULT_WIDTH = COMPACT_DOCK_MIN_WIDTH
 COMPACT_DOCK_DEFAULT_HEIGHT = 184
 COMPACT_DOCK_OUTER_MARGINS = (3, 0, 3, 3)
 COMPACT_DOCK_PANEL_BG = "#2b2b2b"
+# Measured in Painter 12.1: a floating or standalone dock's title bar is
+# #2b2b2b, but docks tabbed together show their selected tab in #333333, so
+# the surface follows the dock state to stay seamless with its header.
+COMPACT_DOCK_TABBED_PANEL_BG = "#333333"
 COMPACT_DOCK_CARD_BG = "#1b1b1b"
 COMPACT_DOCK_CARD_RADIUS = 10
 FOOTER_BUTTON_HEIGHT = 26
@@ -1334,8 +1338,11 @@ def make_action_row(*buttons, parent=None):
 def build_compact_dock_stylesheet():
     """Return styles learned from live Painter dock panels."""
     return f"""
-QWidget#RizumCompactDockSurface {{
+QWidget[rizumCompactDockSurface="true"] {{
     background: {COMPACT_DOCK_PANEL_BG};
+}}
+QWidget[rizumCompactDockSurface="true"][rizumDockTabbed="true"] {{
+    background: {COMPACT_DOCK_TABBED_PANEL_BG};
 }}
 QFrame#RizumCompactDockCard,
 QFrame#RizumCompactDockCard QWidget#RizumTransparent {{
@@ -1351,18 +1358,110 @@ QFrame#RizumCompactDockCard QPushButton[compactFooter="true"] {{
 """
 
 
-def apply_compact_dock_surface(widget):
-    """Apply Painter-like dock surface palette and local styles."""
+def _enclosing_dock(widget):
+    from PySide6 import QtWidgets
+
+    parent = widget
+    while parent is not None:
+        if isinstance(parent, QtWidgets.QDockWidget):
+            return parent
+        parent = parent.parentWidget()
+    return None
+
+
+def compact_dock_is_tabbed(widget):
+    """Whether the dock holding ``widget`` is docked in a tab group."""
+    from PySide6 import QtWidgets
+
+    dock = _enclosing_dock(widget)
+    if dock is None or dock.isFloating():
+        return False
+    host = dock.parentWidget()
+    return isinstance(host, QtWidgets.QMainWindow) and bool(host.tabifiedDockWidgets(dock))
+
+
+def compact_dock_surface_color(widget):
+    """Surface color that meets the dock header seamlessly in its current state."""
+    if compact_dock_is_tabbed(widget):
+        return COMPACT_DOCK_TABBED_PANEL_BG
+    return COMPACT_DOCK_PANEL_BG
+
+
+def _apply_compact_dock_state(widget):
     from PySide6 import QtGui
 
-    widget.setObjectName("RizumCompactDockSurface")
-    widget.setStyleSheet(widget.styleSheet() + build_compact_dock_stylesheet())
+    tabbed = compact_dock_is_tabbed(widget)
+    color = QtGui.QColor(COMPACT_DOCK_TABBED_PANEL_BG if tabbed else COMPACT_DOCK_PANEL_BG)
     palette = widget.palette()
-    panel_color = QtGui.QColor(COMPACT_DOCK_PANEL_BG)
-    palette.setColor(QtGui.QPalette.ColorRole.Window, panel_color)
-    palette.setColor(QtGui.QPalette.ColorRole.Base, panel_color)
+    palette.setColor(QtGui.QPalette.ColorRole.Window, color)
+    palette.setColor(QtGui.QPalette.ColorRole.Base, color)
     widget.setPalette(palette)
+    if bool(widget.property("rizumDockTabbed")) != tabbed:
+        widget.setProperty("rizumDockTabbed", tabbed)
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
+    widget.update()
+
+
+def _install_compact_dock_tracker(widget):
+    from PySide6 import QtCore, QtWidgets
+
+    class _DockStateTracker(QtCore.QObject):
+        """Re-checks the dock state when Painter re-docks, floats or tabs it."""
+
+        def __init__(self, surface):
+            super().__init__(surface)
+            self._surface = surface
+            self._dock = None
+            self._pending = False
+
+        def eventFilter(self, watched, event):
+            if event.type() in (
+                QtCore.QEvent.Type.ParentChange,
+                QtCore.QEvent.Type.Show,
+                QtCore.QEvent.Type.Resize,
+            ):
+                self.schedule()
+            return False
+
+        def schedule(self):
+            if self._pending:
+                return
+            self._pending = True
+            QtCore.QTimer.singleShot(0, self._refresh)
+
+        def _refresh(self):
+            self._pending = False
+            surface = self._surface
+            if not _is_qt_object_alive(surface):
+                return
+            dock = _enclosing_dock(surface)
+            if dock is not self._dock and dock is not None:
+                self._dock = dock
+                dock.topLevelChanged.connect(lambda *_: self.schedule())
+                dock.dockLocationChanged.connect(lambda *_: self.schedule())
+                dock.visibilityChanged.connect(lambda *_: self.schedule())
+                dock.installEventFilter(self)
+                host = dock.parentWidget()
+                if isinstance(host, QtWidgets.QMainWindow):
+                    host.tabifiedDockWidgetActivated.connect(lambda *_: self.schedule())
+            _apply_compact_dock_state(surface)
+
+    tracker = _DockStateTracker(widget)
+    widget.installEventFilter(tracker)
+    widget._rizum_compact_dock_tracker = tracker
+    return tracker
+
+
+def apply_compact_dock_surface(widget):
+    """Apply Painter-like dock surface palette and local styles."""
+    # Painter persists dock layout by objectName, so visual roles use a property.
+    widget.setProperty("rizumCompactDockSurface", True)
+    widget.setStyleSheet(widget.styleSheet() + build_compact_dock_stylesheet())
     widget.setAutoFillBackground(True)
+    _apply_compact_dock_state(widget)
+    if getattr(widget, "_rizum_compact_dock_tracker", None) is None:
+        _install_compact_dock_tracker(widget)
 
 
 def make_compact_dock_layout(widget):
