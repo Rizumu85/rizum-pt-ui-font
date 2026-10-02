@@ -10,6 +10,12 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6 import QtCore, QtGui, QtTest, QtWidgets
 
 import __init__ as plugin
+import font_session
+
+
+def _exponent(scale):
+    softening = min(1.0, abs(scale - 1.0) / font_session._HIERARCHY_RAMP)
+    return 1.0 - (1.0 - font_session._HIERARCHY_STRENGTH) * softening
 
 
 class UiScalePanelTests(unittest.TestCase):
@@ -141,7 +147,7 @@ class UiScalePanelTests(unittest.TestCase):
         self.assertTrue(bold_label.font().bold())
         self.assertAlmostEqual(plain_label.font().pointSizeF(), base_size, places=2)
 
-    def test_preview_keeps_a_softened_size_hierarchy(self):
+    def test_preview_keeps_painters_size_hierarchy(self):
         panel = self.panel
         small = QtWidgets.QLabel("small")
         self.addCleanup(small.deleteLater)
@@ -163,9 +169,9 @@ class UiScalePanelTests(unittest.TestCase):
 
         panel.scale.setValue(1.25)
         self.app.processEvents()
-        # 0.8x of the base keeps half its difference: sqrt(0.8) ~= 0.894x.
+        # 0.8x of the base keeps its ratio to the configured strength.
         self.assertAlmostEqual(
-            small.font().pointSizeF(), base_size * 1.25 * 0.8 ** 0.5, delta=0.05
+            small.font().pointSizeF(), base_size * 1.25 * 0.8 ** _exponent(1.25), delta=0.05
         )
         self.assertEqual(mono.font().family(), mono_family)
         self.assertEqual(
@@ -190,11 +196,11 @@ class UiScalePanelTests(unittest.TestCase):
         self.app.processEvents()
         self.assertAlmostEqual(small.font().pointSizeF(), base_size * 0.8, delta=0.05)
 
-        # Halfway through the ramp keeps 0.75 of the size difference.
+        # Halfway through the ramp applies half of the configured softening.
         panel.session.preview(plugin.FontState(scale=1.125, family="MiSans"))
         self.app.processEvents()
         self.assertAlmostEqual(
-            small.font().pointSizeF(), base_size * 1.125 * 0.8 ** 0.75, delta=0.05
+            small.font().pointSizeF(), base_size * 1.125 * 0.8 ** _exponent(1.125), delta=0.05
         )
 
     def test_widgets_shown_after_the_preview_appear_on_the_live_font(self):

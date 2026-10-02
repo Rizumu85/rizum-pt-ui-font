@@ -13,7 +13,9 @@ _PENDING_FONT_PROPERTY = "rizumUiFontPending"
 # Painter's ratios unchanged. The user chose 1.0 scale to mean "Painter's
 # own sizes", so the softening ramps in from scale 1.0 and reaches
 # _HIERARCHY_STRENGTH once the scale is _HIERARCHY_RAMP away from 1.0.
-_HIERARCHY_STRENGTH = 0.5
+# Set to 1.0 (no softening) because the user prefers narrow panels: Painter
+# clips content that outgrows a dock, and softened captions need more width.
+_HIERARCHY_STRENGTH = 1.0
 _HIERARCHY_RAMP = 0.25
 _MIN_SIZE_RATIO = 0.6
 _MAX_SIZE_RATIO = 1.8
