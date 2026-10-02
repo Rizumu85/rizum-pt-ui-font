@@ -7,6 +7,7 @@ from dataclasses import dataclass
 _UI_SCALE_PROPERTY = "rizumUiFontScale"
 _BASELINE_FONT_PROPERTY = "rizumUiFontBaseline"
 _TARGET_FONT_PROPERTY = "rizumUiFontTarget"
+_PENDING_FONT_PROPERTY = "rizumUiFontPending"
 # How much of a widget's own size difference from the application font
 # survives a preview: 0 makes every widget the same size (0.5.0), 1 keeps
 # Painter's ratios unchanged. The user chose 1.0 scale to mean "Painter's
@@ -83,6 +84,8 @@ class QtFontApplier:
         # True while this applier is setting fonts, so the live watcher can
         # tell its own FontChange events from Painter's.
         self.applying = False
+        # Runs a callable on the next event-loop turn (set by the panel).
+        self.defer = None
 
     def build_font(self, state):
         state = FontState.from_value(state)
@@ -131,23 +134,65 @@ class QtFontApplier:
         return True
 
     def widget_font_changed(self, widget):
-        """Painter changed a widget's font (a repolish resets it); re-apply."""
+        """React to a font change on a widget this applier manages.
+
+        A Painter repolish puts the stylesheet size back, which is the
+        widget's baseline size: re-apply at once. Any other size may be a
+        transient (unpolish fires before polish) or a deliberate font from
+        Painter or another plugin, so that decision waits one event-loop
+        turn; a deliberate font is then respected until the next full
+        apply re-reads it as the new baseline.
+        """
         if self.applying:
             return False
+        QFont = self.QtGui.QFont
         try:
             current = widget.font()
             target = widget.property(_TARGET_FONT_PROPERTY)
+            baseline = widget.property(_BASELINE_FONT_PROPERTY)
         except Exception:
             return False
-        if isinstance(target, self.QtGui.QFont) and current == target:
+        if not isinstance(baseline, QFont):
             return False
-        # The new font is Painter's own; it becomes the widget's baseline.
+        if isinstance(target, QFont) and _same_size(current, target):
+            return False
+        if _same_size(current, baseline):
+            try:
+                widget.setProperty(_TARGET_FONT_PROPERTY, None)
+            except Exception:
+                return False
+            return self.apply_to_widget(widget)
+        if self.defer is None:
+            return False
+        try:
+            if widget.property(_PENDING_FONT_PROPERTY):
+                return False
+            widget.setProperty(_PENDING_FONT_PROPERTY, True)
+        except Exception:
+            return False
+        self.defer(lambda: self._settle_foreign_font(widget))
+        return False
+
+    def _settle_foreign_font(self, widget):
+        QFont = self.QtGui.QFont
+        try:
+            widget.setProperty(_PENDING_FONT_PROPERTY, None)
+            current = widget.font()
+            target = widget.property(_TARGET_FONT_PROPERTY)
+            baseline = widget.property(_BASELINE_FONT_PROPERTY)
+        except Exception:
+            return
+        if isinstance(target, QFont) and _same_size(current, target):
+            return
+        if isinstance(baseline, QFont) and _same_size(current, baseline):
+            self.apply_to_widget(widget)
+            return
+        # Deliberate: forget our record so the next full apply starts from it.
         try:
             widget.setProperty(_BASELINE_FONT_PROPERTY, None)
             widget.setProperty(_TARGET_FONT_PROPERTY, None)
         except Exception:
-            return False
-        return self.apply_to_widget(widget)
+            pass
 
     def apply_font(self, font, state):
         """Apply ``font`` to the application and every existing widget.
@@ -295,6 +340,12 @@ class QtFontApplier:
             return bool(self.QtGui.QFontInfo(font).fixedPitch())
         except Exception:
             return False
+
+
+def _same_size(font, other):
+    if font.pixelSize() > 0 or other.pixelSize() > 0:
+        return font.pixelSize() == other.pixelSize()
+    return abs(font.pointSizeF() - other.pointSizeF()) < 0.05
 
 
 def _menu_state(state):

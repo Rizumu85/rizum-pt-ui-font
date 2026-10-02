@@ -263,6 +263,54 @@ class UiScalePanelTests(unittest.TestCase):
         self.assertTrue(label.font().bold())
         self.assertEqual(label.font().family(), "MiSans")
 
+    def test_deliberate_fonts_from_others_are_respected(self):
+        host_qss = "QLabel { font-size: 11px; }"
+        saved_qss = self.app.styleSheet()
+        self.app.setStyleSheet(host_qss)
+        self.addCleanup(self.app.setStyleSheet, saved_qss)
+        panel = self.panel
+        panel.session.preview(plugin.FontState(scale=1.25, family="MiSans"))
+
+        label = QtWidgets.QLabel("late")
+        self.addCleanup(label.deleteLater)
+        label.show()
+        self.assertGreater(QtGui.QFontInfo(label.font()).pixelSize(), 11)
+
+        # Another plugin sizes its own text; the watcher must not re-scale it.
+        own = QtGui.QFont(label.font())
+        own.setPixelSize(20)
+        label.setFont(own)
+        self.app.processEvents()
+        self.assertEqual(QtGui.QFontInfo(label.font()).pixelSize(), 20)
+        self.assertIsNone(label.property("rizumUiFontBaseline"))
+
+    def test_sibling_plugin_panels_are_left_to_themselves(self):
+        panel = self.panel
+        panel.session.preview(plugin.FontState(scale=1.25, family="MiSans"))
+        base_pt = panel.original_font.pointSizeF()
+
+        root = QtWidgets.QWidget()
+        root.setObjectName("RizumOtherPluginPanel")
+        self.addCleanup(root.deleteLater)
+        child = QtWidgets.QLabel("theirs", root)
+        own = QtGui.QFont("Courier New")
+        own.setPointSizeF(base_pt)
+        child.setFont(own)
+        dock = QtWidgets.QDockWidget("Other")
+        dock.setObjectName("RizumOtherPluginDock")
+        self.addCleanup(dock.deleteLater)
+        title = QtWidgets.QLabel("title")
+        dock.setTitleBarWidget(title)
+        dock.setWidget(root)
+
+        dock.show()
+
+        self.assertEqual(child.font().family(), "Courier New")
+        self.assertAlmostEqual(child.font().pointSizeF(), base_pt, delta=0.05)
+        # The dock's own title bar is Painter's and still follows the host.
+        self.assertEqual(title.font().family(), "MiSans")
+        self.assertGreater(title.font().pointSizeF(), base_pt + 0.5)
+
     def test_closing_the_panel_stops_watching_new_widgets(self):
         panel = self.panel
         panel.session.preview(plugin.FontState(scale=1.25, family="MiSans"))

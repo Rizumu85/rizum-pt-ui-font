@@ -182,6 +182,7 @@ class UiScalePanel:
         # Painter builds panels after startup and after a project opens; the
         # watcher puts each widget onto the live font as it is shown.
         self._watcher = _LiveFontWatcher(self.session.applier, self)
+        self.session.applier.defer = lambda fn: QtCore.QTimer.singleShot(0, fn)
         QtWidgets.QApplication.instance().installEventFilter(self._watcher)
         self._base_panel_stylesheet = ""
         self._styled_rows = {}
@@ -1304,14 +1305,44 @@ def _make_live_font_watcher_class():
         def eventFilter(self, obj, event):
             kind = event.type()
             if kind == self._SHOW:
-                if obj.isWidgetType() and not self._panel.owns_widget(obj):
+                if self._is_host_widget(obj):
                     self._applier.apply_to_widget(obj)
             elif kind == self._FONT_CHANGE:
-                if obj.isWidgetType() and not self._panel.owns_widget(obj):
+                if self._is_host_widget(obj):
                     self._applier.widget_font_changed(obj)
             return False
 
+        def _is_host_widget(self, obj):
+            if not obj.isWidgetType() or self._panel.owns_widget(obj):
+                return False
+            return not _is_sibling_plugin_widget(obj)
+
     return LiveFontWatcher
+
+
+def _is_sibling_plugin_widget(widget):
+    """True inside another Rizum plugin's panel or dialog.
+
+    Those scale themselves from rizumUiFontScale, so a second pass here
+    would compound it. Every Rizum root is named "Rizum..."; the dock a
+    panel sits in is skipped so its Painter-drawn title bar still follows
+    the host font.
+    """
+    from PySide6 import QtWidgets
+
+    node = widget
+    for _ in range(16):
+        if node is None:
+            return False
+        try:
+            if not isinstance(node, QtWidgets.QDockWidget) and node.objectName().startswith("Rizum"):
+                return True
+            node = node.parent()
+        except Exception:
+            return False
+    return False
+
+
 
 
 def _LiveFontWatcher(applier, panel):
