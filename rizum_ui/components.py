@@ -4267,6 +4267,94 @@ QLineEdit#RizumCompactStepperEditor {{
     return _CompactStepper()
 
 
+POPUP_MENU_RADIUS = 6
+POPUP_MENU_FONT_PX = 12
+
+
+def _application_ui_scale():
+    from PySide6 import QtWidgets
+
+    app = QtWidgets.QApplication.instance()
+    try:
+        return float(app.property("rizumUiFontScale") or 1.0) if app else 1.0
+    except (TypeError, ValueError):
+        return 1.0
+
+
+def popup_menu_stylesheet(scale=None):
+    """Scaled metrics for ``QMenu#RizumPopupMenu``.
+
+    The shared theme and Painter's host style both pin menu metrics, so a
+    popup restates its font and spacing locally at the current UI Font scale
+    (font-scale rule 7). Painter also paints disabled items as grey boxes,
+    which the local rules replace with muted text.
+    """
+    scale = _application_ui_scale() if scale is None else float(scale)
+
+    def scaled(value):
+        return max(int(round(value * 0.75)), int(round(value * scale)))
+
+    return f"""
+QMenu#RizumPopupMenu {{
+    font-size: {scaled(POPUP_MENU_FONT_PX)}px;
+    padding: {scaled(4)}px;
+}}
+QMenu#RizumPopupMenu::item {{
+    padding: {scaled(6)}px {scaled(22)}px {scaled(6)}px {scaled(8)}px;
+}}
+QMenu#RizumPopupMenu::item:disabled {{
+    background: transparent;
+    color: #5c5c5c;
+}}
+QMenu#RizumPopupMenu::separator {{
+    height: 1px;
+    background: #414141;
+    margin: {scaled(4)}px {scaled(6)}px;
+}}
+"""
+
+
+def make_popup_menu(parent=None, extra_stylesheet=""):
+    """Create a rounded shared popup menu scaled to the current UI Font.
+
+    Build menus when they open so they pick up the current scale; a menu kept
+    alive across scale changes must call ``refreshMetrics()``.
+    ``extra_stylesheet`` holds plugin-specific rules appended after the shared
+    ones, so they win where they overlap.
+    """
+    from PySide6 import QtCore, QtGui, QtWidgets
+
+    class _PopupMenu(QtWidgets.QMenu):
+        def __init__(self):
+            super().__init__(parent)
+            self.setObjectName("RizumPopupMenu")
+            self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TranslucentBackground, True)
+            self.setWindowFlag(QtCore.Qt.WindowType.NoDropShadowWindowHint, True)
+            self.setWindowFlag(QtCore.Qt.WindowType.FramelessWindowHint, True)
+            self._extra_stylesheet = extra_stylesheet
+            self.refreshMetrics()
+
+        def refreshMetrics(self):
+            self.setStyleSheet(popup_menu_stylesheet() + self._extra_stylesheet)
+
+        def resizeEvent(self, event):
+            super().resizeEvent(event)
+            rect = self.rect()
+            if rect.isEmpty():
+                return
+            # Translucent popups are not composited on every Windows setup,
+            # and the menu background bleeds past border-radius; a mask that
+            # matches the full rect clips only the corner pixels.
+            path = QtGui.QPainterPath()
+            path.addRoundedRect(QtCore.QRectF(rect), POPUP_MENU_RADIUS, POPUP_MENU_RADIUS)
+            region = QtGui.QRegion()
+            for polygon in path.toSubpathPolygons():
+                region += QtGui.QRegion(polygon.toPolygon())
+            self.setMask(region)
+
+    return _PopupMenu()
+
+
 def make_combo_input(options=None):
     """Create a functional compact combo input backed by a lightweight menu."""
     from PySide6 import QtCore, QtGui, QtWidgets
@@ -4497,13 +4585,7 @@ def make_combo_input(options=None):
             if self._menu is not None and self._menu.isVisible():
                 self._menu.close()
                 return
-            menu = QtWidgets.QMenu(self)
-            menu.setObjectName("RizumPopupMenu")
-            menu.setAttribute(QtCore.Qt.WidgetAttribute.WA_TranslucentBackground, True)
-            try:
-                menu.setWindowFlag(QtCore.Qt.WindowType.NoDropShadowWindowHint, True)
-            except Exception:
-                pass
+            menu = make_popup_menu(self)
             for index, item in enumerate(self._items):
                 action = menu.addAction(item[0])
                 action.triggered.connect(lambda checked=False, i=index: self.setCurrentIndex(i))
@@ -4518,26 +4600,7 @@ def make_combo_input(options=None):
             # before the open animation begins.
             menu.setWindowOpacity(0.0)
             menu.popup(self.mapToGlobal(QtCore.QPoint(popup_x, self.height() + 4)))
-            QtCore.QTimer.singleShot(0, lambda: self._applyMenuMask(menu))
             QtCore.QTimer.singleShot(0, lambda: self._animate_menu_open(menu))
-
-        def _applyMenuMask(self, menu):
-            if not _is_qt_object_alive(menu):
-                return
-            rect = menu.rect()
-            if rect.isEmpty():
-                return
-            # QMenu background fills the entire widget rect even with
-            # border-radius, bleeding past the rounded corners. A mask clips
-            # those corner pixels. The mask matches the full rect (no inset)
-            # so the border stays visible on all four sides; only the
-            # transparent corner triangles outside the radius are removed.
-            path = QtGui.QPainterPath()
-            path.addRoundedRect(QtCore.QRectF(rect), 6, 6)
-            region = QtGui.QRegion()
-            for polygon in path.toSubpathPolygons():
-                region += QtGui.QRegion(polygon.toPolygon())
-            menu.setMask(region)
 
         def _animate_menu_open(self, menu):
             if not _is_qt_object_alive(menu) or not menu.isVisible():
