@@ -893,9 +893,9 @@ class UiScalePanel:
             pass
 
     def _refresh_own_panel_font(self, font):
+        # Only the panel content; the dock and its title bar follow Painter's
+        # own title font like every other dock.
         _refresh_widget_tree_font(self.widget, font)
-        if _DOCK is not None:
-            _refresh_widget_tree_font(_DOCK, font)
         if self.ui is not None:
             self.widget.setStyleSheet(
                 self._base_panel_stylesheet + "\n" + _build_panel_font_override(font)

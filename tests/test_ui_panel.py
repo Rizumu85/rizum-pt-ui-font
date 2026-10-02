@@ -197,6 +197,29 @@ class UiScalePanelTests(unittest.TestCase):
             small.font().pointSizeF(), base_size * 1.125 * 0.8 ** 0.75, delta=0.05
         )
 
+    def test_preview_keeps_painter_dock_title_style(self):
+        panel = self.panel
+        dock = QtWidgets.QDockWidget("UI Font")
+        self.addCleanup(dock.deleteLater)
+        dock.setWidget(panel.widget)
+        title = QtWidgets.QLabel("UI Font")
+        title_font = QtGui.QFont(title.font())
+        title_font.setBold(True)
+        title_font.setCapitalization(QtGui.QFont.Capitalization.AllUppercase)
+        title.setFont(title_font)
+        dock.setTitleBarWidget(title)
+        saved_dock = plugin._DOCK
+        plugin._DOCK = dock
+        self.addCleanup(setattr, plugin, "_DOCK", saved_dock)
+
+        panel.scale.setValue(1.25)
+        self.app.processEvents()
+
+        self.assertTrue(title.font().bold())
+        self.assertEqual(
+            title.font().capitalization(), QtGui.QFont.Capitalization.AllUppercase
+        )
+
     def test_preview_reaches_widgets_under_an_explicit_host_font(self):
         # Painter sets fonts on its own windows, which blocks QApplication.setFont.
         panel = self.panel
