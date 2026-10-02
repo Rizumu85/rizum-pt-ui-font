@@ -176,6 +176,27 @@ class UiScalePanelTests(unittest.TestCase):
         self.app.processEvents()
         self.assertAlmostEqual(small.font().pointSizeF(), small_font.pointSizeF(), places=2)
 
+    def test_scale_one_keeps_painter_sizes_and_softening_ramps_in(self):
+        panel = self.panel
+        small = QtWidgets.QLabel("small")
+        self.addCleanup(small.deleteLater)
+        small_font = QtGui.QFont(small.font())
+        small_font.setPointSizeF(self.app.font().pointSizeF() * 0.8)
+        small.setFont(small_font)
+        base_size = panel.original_font.pointSizeF()
+
+        # Changing only the family at 1.0 must not resize Painter's text.
+        panel.session.preview(plugin.FontState(scale=1.0, family="MiSans"))
+        self.app.processEvents()
+        self.assertAlmostEqual(small.font().pointSizeF(), base_size * 0.8, delta=0.05)
+
+        # Halfway through the ramp keeps 0.75 of the size difference.
+        panel.session.preview(plugin.FontState(scale=1.125, family="MiSans"))
+        self.app.processEvents()
+        self.assertAlmostEqual(
+            small.font().pointSizeF(), base_size * 1.125 * 0.8 ** 0.75, delta=0.05
+        )
+
     def test_preview_reaches_widgets_under_an_explicit_host_font(self):
         # Painter sets fonts on its own windows, which blocks QApplication.setFont.
         panel = self.panel

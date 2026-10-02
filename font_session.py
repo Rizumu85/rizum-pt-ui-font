@@ -8,8 +8,11 @@ _UI_SCALE_PROPERTY = "rizumUiFontScale"
 _BASELINE_FONT_PROPERTY = "rizumUiFontBaseline"
 # How much of a widget's own size difference from the application font
 # survives a preview: 0 makes every widget the same size (0.5.0), 1 keeps
-# Painter's ratios unchanged. 0.5 keeps a softened hierarchy.
+# Painter's ratios unchanged. The user chose 1.0 scale to mean "Painter's
+# own sizes", so the softening ramps in from scale 1.0 and reaches
+# _HIERARCHY_STRENGTH once the scale is _HIERARCHY_RAMP away from 1.0.
 _HIERARCHY_STRENGTH = 0.5
+_HIERARCHY_RAMP = 0.25
 _MIN_SIZE_RATIO = 0.6
 _MAX_SIZE_RATIO = 1.8
 
@@ -143,16 +146,16 @@ class QtFontApplier:
         """Return ``font`` carrying the widget's own style traits.
 
         Family and hinting come from the applied font, so the whole UI uses
-        the chosen font. Size starts from the applied font and keeps a
-        softened share of the widget's own size difference, so headers stay
-        larger and captions smaller without small text staying tiny. Weight,
+        the chosen font. Size starts from the applied font and keeps the
+        widget's own size difference, softened as the scale moves away from
+        1.0 so small text does not stay tiny. Weight,
         italic, decoration, capitalization, spacing, and a monospace family
         are kept from the widget's own font.
         """
         if state.is_default():
             return self.QtGui.QFont(baseline)
         widget_font = self.QtGui.QFont(font)
-        _scale_font(widget_font, self._size_ratio(baseline) ** _HIERARCHY_STRENGTH)
+        _scale_font(widget_font, self._size_factor(baseline, state.scale))
         widget_font.setWeight(baseline.weight())
         widget_font.setItalic(baseline.italic())
         widget_font.setUnderline(baseline.underline())
@@ -164,13 +167,24 @@ class QtFontApplier:
             widget_font.setFamily(baseline.family())
         return widget_font
 
+    def _size_factor(self, baseline, scale):
+        ratio = self._size_ratio(baseline)
+        if ratio is None:
+            return 1.0
+        softening = min(1.0, abs(scale - 1.0) / _HIERARCHY_RAMP)
+        exponent = 1.0 - (1.0 - _HIERARCHY_STRENGTH) * softening
+        # Clamp only as far as softening applies, so scale 1.0 is exact.
+        clamped = min(_MAX_SIZE_RATIO, max(_MIN_SIZE_RATIO, ratio))
+        ratio += (clamped - ratio) * softening
+        return ratio ** exponent
+
     def _size_ratio(self, baseline):
         """Widget size relative to the application font, in points."""
         widget_size = self._point_size(baseline)
         app_size = self._point_size(self.original_font)
         if widget_size <= 0 or app_size <= 0:
-            return 1.0
-        return min(_MAX_SIZE_RATIO, max(_MIN_SIZE_RATIO, widget_size / app_size))
+            return None
+        return widget_size / app_size
 
     def _point_size(self, font):
         # Pixel-sized fonts have no point size; ask Qt what they resolve to.
