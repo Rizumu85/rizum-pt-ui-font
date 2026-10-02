@@ -197,6 +197,40 @@ class UiScalePanelTests(unittest.TestCase):
             small.font().pointSizeF(), base_size * 1.125 * 0.8 ** 0.75, delta=0.05
         )
 
+    def test_reapply_reaches_widgets_built_after_the_preview(self):
+        # Painter builds panels after startup and after a project opens.
+        panel = self.panel
+        applier = panel.session.applier
+        panel.session.preview(plugin.FontState(scale=1.25, family="MiSans"))
+        base_pt = panel.original_font.pointSizeF()
+
+        # Sized by Painter's stylesheet: still at its own, unscaled size.
+        styled = QtWidgets.QLabel("styled")
+        self.addCleanup(styled.deleteLater)
+        styled_font = QtGui.QFont(styled.font())
+        styled_font.setPointSizeF(base_pt * 0.8)
+        styled.setFont(styled_font)
+        # Inherits the application font, which already carries the preview.
+        inherited = QtWidgets.QLabel("inherited")
+        self.addCleanup(inherited.deleteLater)
+
+        panel.session.reapply()
+
+        expected = base_pt * 1.25 * applier._size_factor(styled_font, 1.25)
+        self.assertAlmostEqual(styled.font().pointSizeF(), expected, delta=0.05)
+        self.assertAlmostEqual(inherited.font().pointSizeF(), base_pt * 1.25, delta=0.05)
+
+        panel.session.reapply()
+        self.assertAlmostEqual(styled.font().pointSizeF(), expected, delta=0.05)
+        self.assertEqual(applier._applied_state.scale, 1.25)
+
+    def test_scheduled_reapply_stops_when_the_panel_closes(self):
+        panel = self.panel
+        panel.schedule_reapply(10000)
+        self.assertTrue(panel._reapply_timer.isActive())
+        panel.close()
+        self.assertFalse(panel._reapply_timer.isActive())
+
     def test_menus_scale_ahead_of_the_rest(self):
         # The user wants menus at 1.25 while the rest of the UI is at 1.20.
         panel = self.panel

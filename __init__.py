@@ -27,6 +27,7 @@ except Exception:
 _PANEL = None
 _DOCK = None
 _GUI_READY_CONNECTED = False
+_PROJECT_REFRESH_CONNECTED = False
 _STARTUP_SURFACE_READY = False
 _STARTUP_SURFACE_PREPARING = False
 _STARTUP_VISIBILITY_SETTLING = False
@@ -179,6 +180,11 @@ class UiScalePanel:
                 self._refresh_own_panel_font,
             ),
         )
+        # Painter builds panels after startup and after a project opens; they
+        # get its stylesheet size, so the live font is applied once more.
+        self._reapply_timer = QtCore.QTimer()
+        self._reapply_timer.setSingleShot(True)
+        self._reapply_timer.timeout.connect(self._reapply_live_font)
         self._base_panel_stylesheet = ""
         self._styled_rows = {}
 
@@ -624,7 +630,15 @@ class UiScalePanel:
         self.session.revert_to(FontState(), before_apply=self._set_controls)
         self._update_undo_enabled()
 
+    def schedule_reapply(self, delay_ms=500):
+        self._reapply_timer.start(int(delay_ms))
+
+    def _reapply_live_font(self):
+        if _is_qt_object_alive(self.widget):
+            self.session.reapply()
+
     def close(self):
+        self._reapply_timer.stop()
         self.session.restore_original()
         self._styled_rows.clear()
 
@@ -920,6 +934,7 @@ def start_plugin():
     _DOCK.setWindowTitle(_PANEL._tr("panel_title"))
     _connect_floating_resize()
     _connect_dock_visibility()
+    _connect_project_refresh()
     if _gui_ready_marked() or _host_window_visible():
         # Enabled from the Python menu: Painter is already up, so show the
         # panel now instead of waiting for the fallback timer.
@@ -950,6 +965,7 @@ def close_plugin():
     _STARTUP_VISIBILITY_SETTLING = False
     _STARTUP_FIRST_RUN = False
     _disconnect_gui_ready_refresh()
+    _disconnect_project_refresh()
     if _PANEL is not None:
         _PANEL.close()
         _PANEL = None
@@ -1001,6 +1017,40 @@ def _disconnect_gui_ready_refresh():
     except (KeyError, RuntimeError, ValueError):
         pass
     _GUI_READY_CONNECTED = False
+
+
+def _connect_project_refresh():
+    import substance_painter as sp
+
+    global _PROJECT_REFRESH_CONNECTED
+    if _PROJECT_REFRESH_CONNECTED:
+        return
+    sp.event.DISPATCHER.connect_strong(
+        sp.event.ProjectEditionEntered,
+        _on_project_ready,
+    )
+    _PROJECT_REFRESH_CONNECTED = True
+
+
+def _disconnect_project_refresh():
+    import substance_painter as sp
+
+    global _PROJECT_REFRESH_CONNECTED
+    if not _PROJECT_REFRESH_CONNECTED:
+        return
+    try:
+        sp.event.DISPATCHER.disconnect(
+            sp.event.ProjectEditionEntered,
+            _on_project_ready,
+        )
+    except (KeyError, RuntimeError, ValueError):
+        pass
+    _PROJECT_REFRESH_CONNECTED = False
+
+
+def _on_project_ready(_event):
+    if _PANEL is not None and _is_qt_object_alive(_PANEL.widget):
+        _PANEL.schedule_reapply()
 
 
 def _on_gui_ready(_event):
@@ -1150,6 +1200,7 @@ def _apply_saved_layout():
     if _PANEL is None or not _is_qt_object_alive(_PANEL.widget):
         return
     _PANEL.apply_saved_if_needed()
+    _PANEL.schedule_reapply(3000)
     _sync_startup_layout()
 
 

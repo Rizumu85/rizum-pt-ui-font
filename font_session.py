@@ -98,6 +98,12 @@ class QtFontApplier:
     def restore_original(self):
         return self.apply_font(self.original_font, FontState())
 
+    def reapply(self):
+        """Apply the current state again to reach widgets created since."""
+        if self._applied_state.is_default():
+            return False
+        return self.apply_state(self._applied_state)
+
     def apply_font(self, font, state):
         """Apply ``font`` to the application and every existing widget.
 
@@ -141,12 +147,13 @@ class QtFontApplier:
             baseline = self.QtGui.QFont(widget.font())
         except Exception:
             return None
-        # A widget first seen while a preview is active already carries the
-        # preview font; undo it so the next apply does not compound it.
+        # A widget first seen while a preview is active may inherit the
+        # preview font; undo that so the next apply does not compound it.
+        # Widgets sized by Painter's stylesheet are still at their own size.
         applied = self._applied_state
         if self._is_menu(widget):
             applied = _menu_state(applied)
-        if applied.scale and applied.scale != 1.0:
+        if applied.scale and applied.scale != 1.0 and self._inherits_applied(baseline, applied):
             _scale_font(baseline, 1.0 / applied.scale)
         if applied.family and baseline.family() == applied.family:
             baseline.setFamily(self.original_font.family())
@@ -209,6 +216,10 @@ class QtFontApplier:
             return self.QtGui.QFontInfo(font).pointSizeF()
         except Exception:
             return 0.0
+
+    def _inherits_applied(self, font, state):
+        applied_size = self._point_size(self.build_font(state))
+        return abs(self._point_size(font) - applied_size) < 0.05
 
     def _is_menu(self, widget):
         menu_types = tuple(
@@ -308,6 +319,9 @@ class FontSession:
 
     def restore_original(self):
         return self.applier.restore_original()
+
+    def reapply(self):
+        return self.applier.reapply()
 
     def _record(self, state):
         if self._history and self._history[self._index] == state:
