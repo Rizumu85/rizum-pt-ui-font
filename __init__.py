@@ -1345,7 +1345,6 @@ QLabel#RizumHintLabel {{
     font-size: {hint_size:.2f}pt;
 }}
 
-QMenu#RizumPopupMenu,
 QPushButton[variant="dialog-secondary"],
 QPushButton[variant="dialog-primary"] {{
     font-size: {button_size:.2f}pt;
