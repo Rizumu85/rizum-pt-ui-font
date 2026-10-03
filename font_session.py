@@ -22,13 +22,21 @@ _MAX_SIZE_RATIO = 1.8
 # The user wants the menu bar and its menus at 1.25 while the rest of the UI
 # is at 1.20, so menus move 25% further from 1.0 than the chosen scale.
 _MENU_SCALE_GAIN = 1.25
-# Buttons and combo boxes set a panel's minimum width with their own
-# caption, and Painter clips a dock whose content outgrows it. Their text
-# therefore grows by this share of the chosen scale: 0 keeps it at Painter's
-# size (family still changes), 1 scales it like everything else. The user
-# wants panels to stay as narrow as at 1.0; important text (labels, field
-# names, layer names, tabs, edits, menus) still scales fully.
-_SECONDARY_SCALE_GAIN = 0.0
+# Painter's parameter panels (label + control forms) are laid out so their
+# narrowest width holds the default font exactly, and Painter clips content
+# that outgrows a dock. Text inside these docks keeps Painter's size (the
+# family still changes); lists, grids and consoles reflow, so they scale.
+# Names are the docks' Qt object names (Painter 12.1).
+_FIT_DOCK_NAMES = frozenset({
+    "Tool",                   # Properties
+    "textureSetSettings",     # Texture Set Settings
+    "displaySettings",        # Display Settings
+    "ShaderSettings",         # Shader settings
+    "irayParametersView",     # Renderer Settings
+    "CommonSettingsPanel",    # Baking: common settings
+    "MeshMapsSettingsPanel",  # Baking: mesh map settings
+    "ExportServicePanel",     # Export
+})
 
 
 @dataclass(frozen=True)
@@ -237,19 +245,37 @@ class QtFontApplier:
         if font is None:
             font = self.build_font(state)
         menu_state = _menu_state(state)
-        secondary_state = _secondary_state(state)
+        fit_state = FontState(scale=1.0, family=state.family, hinting=state.hinting)
         return {
             "menu": (menu_state, self.build_font(menu_state)),
-            "secondary": (secondary_state, self.build_font(secondary_state)),
+            "fit": (fit_state, self.build_font(fit_state)),
             "text": (state, font),
         }
 
     def _role(self, widget):
         if self._is_menu(widget):
             return "menu"
-        if self._is_secondary(widget):
-            return "secondary"
+        if self._in_fit_dock(widget):
+            return "fit"
         return "text"
+
+    def _in_fit_dock(self, widget):
+        """True for content (not the title bar) of a parameter-panel dock."""
+        QDockWidget = getattr(self.QtWidgets, "QDockWidget", None)
+        if not isinstance(QDockWidget, type):
+            return False
+        node = widget
+        try:
+            for _ in range(32):
+                parent = node.parent()
+                if parent is None:
+                    return False
+                if isinstance(parent, QDockWidget):
+                    return parent.objectName() in _FIT_DOCK_NAMES and node is parent.widget()
+                node = parent
+        except Exception:
+            return False
+        return False
 
     def _apply_widget(self, widget, baseline, fonts):
         state, font = fonts[self._role(widget)]
@@ -346,15 +372,11 @@ class QtFontApplier:
         return abs(self._point_size(font) - applied_size) < 0.05
 
     def _is_menu(self, widget):
-        return self._is_instance(widget, "QMenuBar", "QMenu")
-
-    def _is_secondary(self, widget):
-        return self._is_instance(widget, "QAbstractButton", "QComboBox")
-
-    def _is_instance(self, widget, *names):
         types = tuple(
-            cls for cls in (getattr(self.QtWidgets, name, None) for name in names)
-            if isinstance(cls, type)
+            cls for cls in (
+                getattr(self.QtWidgets, "QMenuBar", None),
+                getattr(self.QtWidgets, "QMenu", None),
+            ) if isinstance(cls, type)
         )
         return bool(types) and isinstance(widget, types)
 
@@ -376,12 +398,6 @@ def _same_size(font, other):
     if font.pixelSize() > 0 or other.pixelSize() > 0:
         return font.pixelSize() == other.pixelSize()
     return abs(font.pointSizeF() - other.pointSizeF()) < 0.05
-
-
-def _secondary_state(state):
-    """Buttons and combo boxes grow by a share of the scale (see above)."""
-    scale = 1.0 + (state.scale - 1.0) * _SECONDARY_SCALE_GAIN
-    return FontState(scale=scale, family=state.family, hinting=state.hinting)
 
 
 def _menu_state(state):

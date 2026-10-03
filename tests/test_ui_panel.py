@@ -330,34 +330,50 @@ class UiScalePanelTests(unittest.TestCase):
         self.assertNotEqual(label.font().family(), "MiSans")
 
 
-    def test_buttons_and_combos_keep_painters_size(self):
-        # Their captions set a dock's minimum width; the user wants panels
-        # to stay as narrow as at 1.0, so only the family changes.
+    def test_parameter_panel_content_keeps_painters_size(self):
+        # Painter's Properties ("Tool") and Texture Set Settings docks fit
+        # their narrowest width only at the default size; their content
+        # changes family but not size. Their title bars still scale.
         panel = self.panel
         base_pt = panel.original_font.pointSizeF()
-        button = QtWidgets.QPushButton("No Resource Selected")
-        self.addCleanup(button.deleteLater)
-        combo = QtWidgets.QComboBox()
-        self.addCleanup(combo.deleteLater)
-        label = QtWidgets.QLabel("Material mode")
-        self.addCleanup(label.deleteLater)
+        dock = QtWidgets.QDockWidget("Properties - Paint")
+        dock.setObjectName("Tool")
+        self.addCleanup(dock.deleteLater)
+        content = QtWidgets.QWidget()
+        row = QtWidgets.QLabel("Position Jitter Distribution", content)
+        combo = QtWidgets.QComboBox(content)
+        dock.setWidget(content)
+        title = QtWidgets.QLabel("PROPERTIES")
+        dock.setTitleBarWidget(title)
+        display = QtWidgets.QDockWidget("Display Settings")
+        display.setObjectName("displaySettings")
+        self.addCleanup(display.deleteLater)
+        exposure = QtWidgets.QLabel("Exposure (EV)")
+        display.setWidget(exposure)
+        other = QtWidgets.QDockWidget("Layers")
+        other.setObjectName("LayersStackView")
+        self.addCleanup(other.deleteLater)
+        layer = QtWidgets.QLabel("Layer 1")
+        other.setWidget(layer)
 
         panel.session.preview(plugin.FontState(scale=1.5, family="MiSans"))
-        for widget in (button, combo):
+        for widget in (row, combo):
             self.assertEqual(widget.font().family(), "MiSans")
             self.assertAlmostEqual(widget.font().pointSizeF(), base_pt, delta=0.05)
-        self.assertAlmostEqual(label.font().pointSizeF(), base_pt * 1.5, delta=0.05)
+        self.assertAlmostEqual(exposure.font().pointSizeF(), base_pt, delta=0.05)
+        self.assertAlmostEqual(title.font().pointSizeF(), base_pt * 1.5, delta=0.05)
+        self.assertAlmostEqual(layer.font().pointSizeF(), base_pt * 1.5, delta=0.05)
 
-        # The same holds for a button shown later.
-        late = QtWidgets.QPushButton("Save")
-        self.addCleanup(late.deleteLater)
+        # Content Painter builds later (shown after the preview) follows too.
+        late = QtWidgets.QLabel("Backface culling", content)
         late.show()
         self.assertEqual(late.font().family(), "MiSans")
         self.assertAlmostEqual(late.font().pointSizeF(), base_pt, delta=0.05)
 
         panel.session.restore_original()
-        self.assertAlmostEqual(label.font().pointSizeF(), base_pt, delta=0.05)
-        self.assertNotEqual(button.font().family(), "MiSans")
+        self.assertNotEqual(row.font().family(), "MiSans")
+        self.assertAlmostEqual(layer.font().pointSizeF(), base_pt, delta=0.05)
+
 
     def test_menus_scale_ahead_of_the_rest(self):
         # The user wants menus at 1.25 while the rest of the UI is at 1.20.
