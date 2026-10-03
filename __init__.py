@@ -7,8 +7,6 @@ experiments with Painter's Qt UI font settings in the current session.
 from __future__ import annotations
 
 import json
-import os
-import re
 import sys
 from pathlib import Path
 
@@ -44,7 +42,8 @@ _HINT_ROW_MIN_WIDTH = 88
 _HINT_ROW_MAX_WIDTH = 150
 _DEFAULT_LANGUAGE = "en"
 _I18N_DIR = _PLUGIN_ROOT / "i18n"
-_PAINTER_LOCALE_PATTERN = re.compile(r"Using locale:\s*([A-Za-z]{2}(?:[_-][A-Za-z]{2})?)")
+_PAINTER_SETTINGS = ("Adobe", "Adobe Substance 3D Painter")
+_LANGUAGE_SETTING = "General/UI_LANGUAGE"
 _FALLBACK_TEXT = {
     "panel_title": "UI Font",
     "size": "Size",
@@ -111,28 +110,23 @@ def _resolve_language(*candidates):
 _TEXT = _load_translations()
 
 
-def _read_painter_log_language():
-    local_app_data = os.environ.get("LOCALAPPDATA")
-    if not local_app_data:
-        return ""
+def _read_painter_language():
+    """The language chosen in Painter's Language preference.
 
-    log_path = (
-        Path(local_app_data)
-        / "Adobe"
-        / "Adobe Substance 3D Painter"
-        / "log.txt"
-    )
-    try:
-        with log_path.open("rb") as handle:
-            handle.seek(0, 2)
-            size = handle.tell()
-            handle.seek(max(size - 131072, 0))
-            text = handle.read().decode("utf-8", errors="ignore")
-    except Exception:
-        return ""
+    Painter's log names a locale too, but only after the plugins have
+    started, so reading the log left the panel in English on a freshly
+    started non-English Painter.
+    """
+    from PySide6 import QtCore
 
-    matches = _PAINTER_LOCALE_PATTERN.findall(text)
-    return matches[-1] if matches else ""
+    settings = QtCore.QSettings(*_PAINTER_SETTINGS)
+    return str(settings.value(_LANGUAGE_SETTING, "") or "")
+
+
+def _read_system_language():
+    from PySide6 import QtCore
+
+    return QtCore.QLocale.system().name()
 
 
 def _log_warning(message):
@@ -163,7 +157,13 @@ class UiScalePanel:
         self.QtWidgets = QtWidgets
         self.ui = _load_ui_kit()
         self.store = QtCore.QSettings("Rizum", "PainterUiFont")
-        self.language = _resolve_language(_read_painter_log_language())
+        # Painter's Language preference starts as "Default (System
+        # Language)", which names no language and makes Painter follow the
+        # system locale; a fresh install is in that state.
+        self.language = _resolve_language(
+            _read_painter_language(),
+            _read_system_language(),
+        )
         self.original_font = QtWidgets.QApplication.font()
         self.settings = QSettingsFontSettings(self.store)
         self.font_dir = _PLUGIN_ROOT / "fonts"
