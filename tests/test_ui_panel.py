@@ -330,6 +330,35 @@ class UiScalePanelTests(unittest.TestCase):
         self.assertNotEqual(label.font().family(), "MiSans")
 
 
+    def test_buttons_and_combos_keep_painters_size(self):
+        # Their captions set a dock's minimum width; the user wants panels
+        # to stay as narrow as at 1.0, so only the family changes.
+        panel = self.panel
+        base_pt = panel.original_font.pointSizeF()
+        button = QtWidgets.QPushButton("No Resource Selected")
+        self.addCleanup(button.deleteLater)
+        combo = QtWidgets.QComboBox()
+        self.addCleanup(combo.deleteLater)
+        label = QtWidgets.QLabel("Material mode")
+        self.addCleanup(label.deleteLater)
+
+        panel.session.preview(plugin.FontState(scale=1.5, family="MiSans"))
+        for widget in (button, combo):
+            self.assertEqual(widget.font().family(), "MiSans")
+            self.assertAlmostEqual(widget.font().pointSizeF(), base_pt, delta=0.05)
+        self.assertAlmostEqual(label.font().pointSizeF(), base_pt * 1.5, delta=0.05)
+
+        # The same holds for a button shown later.
+        late = QtWidgets.QPushButton("Save")
+        self.addCleanup(late.deleteLater)
+        late.show()
+        self.assertEqual(late.font().family(), "MiSans")
+        self.assertAlmostEqual(late.font().pointSizeF(), base_pt, delta=0.05)
+
+        panel.session.restore_original()
+        self.assertAlmostEqual(label.font().pointSizeF(), base_pt, delta=0.05)
+        self.assertNotEqual(button.font().family(), "MiSans")
+
     def test_menus_scale_ahead_of_the_rest(self):
         # The user wants menus at 1.25 while the rest of the UI is at 1.20.
         panel = self.panel

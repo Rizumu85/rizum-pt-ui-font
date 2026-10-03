@@ -22,6 +22,13 @@ _MAX_SIZE_RATIO = 1.8
 # The user wants the menu bar and its menus at 1.25 while the rest of the UI
 # is at 1.20, so menus move 25% further from 1.0 than the chosen scale.
 _MENU_SCALE_GAIN = 1.25
+# Buttons and combo boxes set a panel's minimum width with their own
+# caption, and Painter clips a dock whose content outgrows it. Their text
+# therefore grows by this share of the chosen scale: 0 keeps it at Painter's
+# size (family still changes), 1 scales it like everything else. The user
+# wants panels to stay as narrow as at 1.0; important text (labels, field
+# names, layer names, tabs, edits, menus) still scales fully.
+_SECONDARY_SCALE_GAIN = 0.0
 
 
 @dataclass(frozen=True)
@@ -130,7 +137,7 @@ class QtFontApplier:
             return False
         self.applying = True
         try:
-            self._apply_widget(widget, baseline, state, self.build_font(state), None)
+            self._apply_widget(widget, baseline, self._fonts_by_role(state))
         finally:
             self.applying = False
         return True
@@ -213,22 +220,39 @@ class QtFontApplier:
         self.applying = True
         try:
             app.setFont(font)
-            menu_font = self.build_font(_menu_state(state))
+            fonts = self._fonts_by_role(state, font)
             for widget, baseline in zip(widgets, baselines):
                 if baseline is None:
-                    self.refresh_widget(widget, menu_font if self._is_menu(widget) else font)
+                    self.refresh_widget(widget, fonts[self._role(widget)][1])
                 else:
-                    self._apply_widget(widget, baseline, state, font, menu_font)
+                    self._apply_widget(widget, baseline, fonts)
             self._applied_state = state
             self.refresh_panel(font)
         finally:
             self.applying = False
         return True
 
-    def _apply_widget(self, widget, baseline, state, font, menu_font):
+    def _fonts_by_role(self, state, font=None):
+        """(state, font) for each widget role under the applied ``state``."""
+        if font is None:
+            font = self.build_font(state)
+        menu_state = _menu_state(state)
+        secondary_state = _secondary_state(state)
+        return {
+            "menu": (menu_state, self.build_font(menu_state)),
+            "secondary": (secondary_state, self.build_font(secondary_state)),
+            "text": (state, font),
+        }
+
+    def _role(self, widget):
         if self._is_menu(widget):
-            state = _menu_state(state)
-            font = menu_font if menu_font is not None else self.build_font(state)
+            return "menu"
+        if self._is_secondary(widget):
+            return "secondary"
+        return "text"
+
+    def _apply_widget(self, widget, baseline, fonts):
+        state, font = fonts[self._role(widget)]
         widget_font = self._widget_font(font, baseline, state)
         try:
             widget.setProperty(_TARGET_FONT_PROPERTY, self.QtGui.QFont(widget_font))
@@ -322,13 +346,17 @@ class QtFontApplier:
         return abs(self._point_size(font) - applied_size) < 0.05
 
     def _is_menu(self, widget):
-        menu_types = tuple(
-            cls for cls in (
-                getattr(self.QtWidgets, "QMenuBar", None),
-                getattr(self.QtWidgets, "QMenu", None),
-            ) if isinstance(cls, type)
+        return self._is_instance(widget, "QMenuBar", "QMenu")
+
+    def _is_secondary(self, widget):
+        return self._is_instance(widget, "QAbstractButton", "QComboBox")
+
+    def _is_instance(self, widget, *names):
+        types = tuple(
+            cls for cls in (getattr(self.QtWidgets, name, None) for name in names)
+            if isinstance(cls, type)
         )
-        return bool(menu_types) and isinstance(widget, menu_types)
+        return bool(types) and isinstance(widget, types)
 
     def _is_monospace(self, font):
         QFont = self.QtGui.QFont
@@ -348,6 +376,12 @@ def _same_size(font, other):
     if font.pixelSize() > 0 or other.pixelSize() > 0:
         return font.pixelSize() == other.pixelSize()
     return abs(font.pointSizeF() - other.pointSizeF()) < 0.05
+
+
+def _secondary_state(state):
+    """Buttons and combo boxes grow by a share of the scale (see above)."""
+    scale = 1.0 + (state.scale - 1.0) * _SECONDARY_SCALE_GAIN
+    return FontState(scale=scale, family=state.family, hinting=state.hinting)
 
 
 def _menu_state(state):
