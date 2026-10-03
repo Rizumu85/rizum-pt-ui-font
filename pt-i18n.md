@@ -26,31 +26,23 @@ Translations live in `i18n/*.json`. File names are normalized internally by repl
 
 ## Effective Language Detection
 
-The effective approach is to read Painter's runtime log:
-
-```text
-%LOCALAPPDATA%/Adobe/Adobe Substance 3D Painter/log.txt
-```
-
-Painter writes lines like:
-
-```text
-[INFO] <Qt> "[DBG INFO][NGL Integration]" Using locale: zh_CN
-```
-
-The plugin reads the tail of `log.txt`, extracts the latest `Using locale: xx_XX`, then resolves that language against the available `i18n/*.json` files. If the locale is missing or unsupported, it falls back to English.
+The plugin follows the Painter Languages standard in
+`rizum-pt-ui-prettier/docs/integration.md`: it reads Painter's Language
+preference (`General/UI_LANGUAGE` in Painter's own settings) and, while that
+preference is "Default (System Language)", the system locale. The result is
+resolved against the available `i18n/*.json` files, falling back to English.
 
 ## Removed Failed Approaches
 
-The following approaches were tested or considered but removed from the runtime path because they did not follow Painter's language setting reliably on the target Windows machine:
-
-- `QtCore.QLocale().name()`
-- `QtCore.QLocale.system().name()`
+- Painter's `log.txt` (`Using locale: zh_CN`). The line is written after the
+  plugins have started, so a freshly started Painter always gave English.
+- `QtCore.QLocale().name()`: Painter does not set Qt's default locale to its
+  UI language.
+- `QtCore.QLocale.system().name()` as the only source: it ignores a language
+  picked in Painter's preferences. It is kept as the second candidate only.
 - A plugin-owned `QSettings("Rizum", "PainterUiFont").value("language")` override
 - Environment-variable language overrides
 - A local `language.txt` override file
-
-Keeping only the Painter log path avoids hidden state and makes localization behavior match the host application.
 
 ## Pending: Text-Fit Layout
 
