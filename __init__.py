@@ -16,11 +16,7 @@ if str(_PLUGIN_ROOT) not in sys.path:
 from font_catalog import FontCatalog, QtFontDatabaseAdapter
 from font_session import FontSession, FontState, QSettingsFontSettings, QtFontApplier
 from ui_kit_loader import load_localization as _load_localization
-
-try:
-    from ui_kit_loader import load_ui_kit as _load_bundled_ui_kit
-except Exception:
-    _load_bundled_ui_kit = None
+from ui_kit_loader import load_ui_kit as _load_bundled_ui_kit
 
 _PANEL = None
 _DOCK = None
@@ -91,8 +87,6 @@ def _log_warning(message):
 
 def _load_ui_kit():
     """Return the compact UI kit used by the panel."""
-    if _load_bundled_ui_kit is None:
-        return None
     try:
         return _load_bundled_ui_kit(_PLUGIN_ROOT)
     except Exception:
