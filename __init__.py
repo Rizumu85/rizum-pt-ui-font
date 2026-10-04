@@ -6,7 +6,6 @@ experiments with Painter's Qt UI font settings in the current session.
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -16,6 +15,7 @@ if str(_PLUGIN_ROOT) not in sys.path:
 
 from font_catalog import FontCatalog, QtFontDatabaseAdapter
 from font_session import FontSession, FontState, QSettingsFontSettings, QtFontApplier
+from ui_kit_loader import load_localization as _load_localization
 
 try:
     from ui_kit_loader import load_ui_kit as _load_bundled_ui_kit
@@ -40,10 +40,9 @@ _RESET_BUTTON_WIDTH = 68
 _SAVE_BUTTON_WIDTH = 72
 _HINT_ROW_MIN_WIDTH = 88
 _HINT_ROW_MAX_WIDTH = 150
-_DEFAULT_LANGUAGE = "en"
+_localization = _load_localization(_PLUGIN_ROOT)
+_DEFAULT_LANGUAGE = _localization.DEFAULT_LANGUAGE
 _I18N_DIR = _PLUGIN_ROOT / "i18n"
-_PAINTER_SETTINGS = ("Adobe", "Adobe Substance 3D Painter")
-_LANGUAGE_SETTING = "General/UI_LANGUAGE"
 _FALLBACK_TEXT = {
     "panel_title": "UI Font",
     "size": "Size",
@@ -62,28 +61,15 @@ _FALLBACK_TEXT = {
 }
 
 
-def _load_translations():
-    translations = {_DEFAULT_LANGUAGE: dict(_FALLBACK_TEXT)}
-    if not _I18N_DIR.exists():
-        return translations
-
-    for path in sorted(_I18N_DIR.glob("*.json")):
-        language = _normalize_language(path.stem)
-        try:
-            with path.open("r", encoding="utf-8") as handle:
-                data = json.load(handle)
-        except Exception:
-            continue
-        if not isinstance(data, dict):
-            continue
-        translations[language] = {str(key): str(value) for key, value in data.items()}
-        root = language.split("_", 1)[0]
-        translations.setdefault(root, translations[language])
-    return translations
+_TEXT = _localization.load_catalogs(_I18N_DIR, _FALLBACK_TEXT)
 
 
-def _normalize_language(language):
-    return str(language or "").strip().lower().replace("-", "_")
+def _resolve_language(*candidates):
+    return _localization.resolve_language(_TEXT, *candidates)
+
+
+_read_painter_language = _localization.read_painter_language
+_read_system_language = _localization.read_system_language
 
 
 def _setting_bool(value, default=False):
@@ -92,41 +78,6 @@ def _setting_bool(value, default=False):
     if value is None:
         return bool(default)
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _resolve_language(*candidates):
-    for candidate in candidates:
-        language = _normalize_language(candidate)
-        if not language:
-            continue
-        if language in _TEXT:
-            return language
-        root = language.split("_", 1)[0]
-        if root in _TEXT:
-            return root
-    return _DEFAULT_LANGUAGE
-
-
-_TEXT = _load_translations()
-
-
-def _read_painter_language():
-    """The language chosen in Painter's Language preference.
-
-    Painter's log names a locale too, but only after the plugins have
-    started, so reading the log left the panel in English on a freshly
-    started non-English Painter.
-    """
-    from PySide6 import QtCore
-
-    settings = QtCore.QSettings(*_PAINTER_SETTINGS)
-    return str(settings.value(_LANGUAGE_SETTING, "") or "")
-
-
-def _read_system_language():
-    from PySide6 import QtCore
-
-    return QtCore.QLocale.system().name()
 
 
 def _log_warning(message):

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 UI_KIT_MODULE = "rizum_ui"
+LOCALIZATION_MODULE = "_rizum_ui_font_localization"
 SIBLING_OVERRIDE_ENV = "RIZUM_UI_FONT_USE_SIBLING_PRETTIER"
 
 REQUIRED_UI_KIT_FEATURES = (
@@ -60,6 +62,27 @@ def load_ui_kit(plugin_root, env=None):
             continue
         return module
     return None
+
+
+def load_localization(plugin_root, env=None):
+    """Load the UI kit's Painter-language mechanism without the widget kit.
+
+    The panel's text must not depend on the widget kit: the panel still
+    builds plain Qt widgets when the kit fails its feature check.
+    """
+    env = os.environ if env is None else env
+    for candidate in candidate_roots(plugin_root, env):
+        path = candidate.root / UI_KIT_MODULE / "localization.py"
+        if not path.is_file():
+            continue
+        spec = importlib.util.spec_from_file_location(LOCALIZATION_MODULE, path)
+        module = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(module)
+        except Exception:
+            continue
+        return module
+    raise ImportError(f"No {UI_KIT_MODULE}/localization.py for {plugin_root}")
 
 
 def candidate_roots(plugin_root, env=None):
