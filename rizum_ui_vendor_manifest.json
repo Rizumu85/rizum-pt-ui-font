@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-10-02T01:12:46.467534+00:00",
+  "generated_at": "2026-10-04T03:47:29.397144+00:00",
   "source_root": "rizum-pt-ui-prettier",
-  "source_git_head": "8a77de8",
+  "source_git_head": "a7a2599",
   "source_git_status": "",
   "managed_roots": [
     "rizum_ui",
@@ -12,6 +12,7 @@
     "rizum_ui/animation.py",
     "rizum_ui/components.py",
     "rizum_ui/host_style.py",
+    "rizum_ui/localization.py",
     "rizum_ui/settings_controls.py",
     "rizum_ui/settings_dialog.py",
     "rizum_ui/settings_layout.py",
