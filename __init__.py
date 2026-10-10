@@ -15,11 +15,13 @@ if str(_PLUGIN_ROOT) not in sys.path:
 
 from font_catalog import FontCatalog, QtFontDatabaseAdapter
 from font_session import FontSession, FontState, QSettingsFontSettings, QtFontApplier
+from ui_kit_loader import load_exit_guard as _load_exit_guard
 from ui_kit_loader import load_localization as _load_localization
 from ui_kit_loader import load_ui_kit as _load_bundled_ui_kit
 
 _PANEL = None
 _DOCK = None
+_EXIT_GUARD = None
 _GUI_READY_CONNECTED = False
 _STARTUP_SURFACE_READY = False
 _STARTUP_SURFACE_PREPARING = False
@@ -37,6 +39,7 @@ _SAVE_BUTTON_WIDTH = 72
 _HINT_ROW_MIN_WIDTH = 88
 _HINT_ROW_MAX_WIDTH = 150
 _localization = _load_localization(_PLUGIN_ROOT)
+_exit_guard = _load_exit_guard(_PLUGIN_ROOT)
 _DEFAULT_LANGUAGE = _localization.DEFAULT_LANGUAGE
 _I18N_DIR = _PLUGIN_ROOT / "i18n"
 _FALLBACK_TEXT = {
@@ -867,8 +870,10 @@ def start_plugin():
 
     global _DOCK, _PANEL, _STARTUP_SURFACE_READY, _STARTUP_SURFACE_PREPARING
     global _STARTUP_VISIBILITY_SETTLING, _STARTUP_PANEL_VISIBLE, _STARTUP_FIRST_RUN
+    global _EXIT_GUARD
     _STARTUP_SURFACE_READY = False
     _STARTUP_SURFACE_PREPARING = False
+    _EXIT_GUARD = _exit_guard.install()
     _PANEL = UiScalePanel()
     _STARTUP_FIRST_RUN = _PANEL.is_first_run()
     _STARTUP_PANEL_VISIBLE = _STARTUP_FIRST_RUN or _PANEL.panel_should_start_visible()
@@ -904,6 +909,9 @@ def close_plugin():
 
     global _DOCK, _PANEL, _STARTUP_SURFACE_READY, _STARTUP_SURFACE_PREPARING
     global _STARTUP_VISIBILITY_SETTLING, _STARTUP_FIRST_RUN
+    global _EXIT_GUARD
+    _exit_guard.remove(_EXIT_GUARD)
+    _EXIT_GUARD = None
     language = _PANEL.language if _PANEL is not None else _DEFAULT_LANGUAGE
     _STARTUP_SURFACE_READY = False
     _STARTUP_SURFACE_PREPARING = False

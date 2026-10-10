@@ -11,6 +11,7 @@ from pathlib import Path
 
 UI_KIT_MODULE = "rizum_ui"
 LOCALIZATION_MODULE = "_rizum_ui_font_localization"
+EXIT_GUARD_MODULE = "_rizum_ui_font_exit_guard"
 SIBLING_OVERRIDE_ENV = "RIZUM_UI_FONT_USE_SIBLING_PRETTIER"
 
 REQUIRED_UI_KIT_FEATURES = (
@@ -70,19 +71,32 @@ def load_localization(plugin_root, env=None):
     The panel's text must not depend on the widget kit: the panel still
     builds plain Qt widgets when the kit fails its feature check.
     """
+    return _load_standalone(plugin_root, "localization.py", LOCALIZATION_MODULE, env)
+
+
+def load_exit_guard(plugin_root, env=None):
+    """Load the UI kit's exit guard without the widget kit.
+
+    The guard must run even when the kit fails its feature check: the panel
+    then builds plain Qt widgets, but the font watcher still filters events.
+    """
+    return _load_standalone(plugin_root, "exit_guard.py", EXIT_GUARD_MODULE, env)
+
+
+def _load_standalone(plugin_root, filename, module_name, env=None):
     env = os.environ if env is None else env
     for candidate in candidate_roots(plugin_root, env):
-        path = candidate.root / UI_KIT_MODULE / "localization.py"
+        path = candidate.root / UI_KIT_MODULE / filename
         if not path.is_file():
             continue
-        spec = importlib.util.spec_from_file_location(LOCALIZATION_MODULE, path)
+        spec = importlib.util.spec_from_file_location(module_name, path)
         module = importlib.util.module_from_spec(spec)
         try:
             spec.loader.exec_module(module)
         except Exception:
             continue
         return module
-    raise ImportError(f"No {UI_KIT_MODULE}/localization.py for {plugin_root}")
+    raise ImportError(f"No {UI_KIT_MODULE}/{filename} for {plugin_root}")
 
 
 def candidate_roots(plugin_root, env=None):
