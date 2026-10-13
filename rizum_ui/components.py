@@ -1404,15 +1404,30 @@ def _apply_compact_dock_state(widget):
 
 
 def _install_compact_dock_tracker(widget):
-    from PySide6 import QtCore, QtWidgets
+    import shiboken6
+    from PySide6 import QtCore
 
     class _DockStateTracker(QtCore.QObject):
-        """Re-checks the dock state when Painter re-docks, floats or tabs it."""
+        """Re-checks the dock state when Painter re-docks, floats or tabs it.
+
+        It connects to nothing of Painter's main window and keeps no wrapper
+        of the surface or the dock. It used to follow the main window's
+        ``tabifiedDockWidgetActivated``: a connection made from Python keeps
+        the sender's wrapper alive for good, and with it everything any
+        plugin found through that wrapper. Painter destroys those widgets
+        after it has closed the plugins, and the leftover wrappers crashed it
+        on most exits (access violation in shiboken's ``~BindingManager``;
+        measured with real exits, see docs/integration.md). The wrappers it
+        held of the surface and the dock kept a closed plugin's whole panel
+        alive the same way, behind the collector's back.
+
+        The dock's own signals and the two event filters tell about a tab
+        change too: the dock is shown, hidden or resized by it.
+        """
 
         def __init__(self, surface):
             super().__init__(surface)
-            self._surface = surface
-            self._dock = None
+            self._dock_address = 0
             self._pending = False
 
         def eventFilter(self, watched, event):
@@ -1424,27 +1439,26 @@ def _install_compact_dock_tracker(widget):
                 self.schedule()
             return False
 
+        @QtCore.Slot()
         def schedule(self):
             if self._pending:
                 return
             self._pending = True
-            QtCore.QTimer.singleShot(0, self._refresh)
+            QtCore.QTimer.singleShot(0, self, self._refresh)
 
         def _refresh(self):
             self._pending = False
-            surface = self._surface
+            surface = self.parent()
             if not _is_qt_object_alive(surface):
                 return
             dock = _enclosing_dock(surface)
-            if dock is not self._dock and dock is not None:
-                self._dock = dock
-                dock.topLevelChanged.connect(lambda *_: self.schedule())
-                dock.dockLocationChanged.connect(lambda *_: self.schedule())
-                dock.visibilityChanged.connect(lambda *_: self.schedule())
+            address = shiboken6.getCppPointer(dock)[0] if dock is not None else 0
+            if address and address != self._dock_address:
+                self._dock_address = address
+                dock.topLevelChanged.connect(self.schedule)
+                dock.dockLocationChanged.connect(self.schedule)
+                dock.visibilityChanged.connect(self.schedule)
                 dock.installEventFilter(self)
-                host = dock.parentWidget()
-                if isinstance(host, QtWidgets.QMainWindow):
-                    host.tabifiedDockWidgetActivated.connect(lambda *_: self.schedule())
             _apply_compact_dock_state(surface)
 
     tracker = _DockStateTracker(widget)
