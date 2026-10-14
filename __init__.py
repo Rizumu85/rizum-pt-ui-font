@@ -130,7 +130,15 @@ class UiScalePanel:
         # Painter builds panels after startup and after a project opens; the
         # watcher puts each widget onto the live font as it is shown.
         self._watcher = _LiveFontWatcher(self.session.applier, self)
-        self.session.applier.defer = lambda fn: QtCore.QTimer.singleShot(0, fn)
+        # The plugin's deferred work waits in timers under this object, so
+        # close() can stop it: a QTimer.singleShot call cannot be cancelled
+        # and ran after the plugin had closed.
+        self._timers = QtCore.QObject()
+        self._settle_timer = QtCore.QTimer(self._timers)
+        self._settle_timer.setSingleShot(True)
+        self._settle_timer.setInterval(0)
+        self._settle_timer.timeout.connect(self.session.applier.settle_pending)
+        self.session.applier.request_settle = self._settle_timer.start
         QtWidgets.QApplication.instance().installEventFilter(self._watcher)
         self._base_panel_stylesheet = ""
         self._styled_rows = {}
@@ -588,6 +596,9 @@ class UiScalePanel:
         app = self.QtWidgets.QApplication.instance()
         if app is not None:
             app.removeEventFilter(self._watcher)
+        for timer in self._timers.findChildren(self.QtCore.QTimer):
+            timer.stop()
+        self.session.applier.forget_pending()
         self.session.restore_original()
         self._styled_rows.clear()
 

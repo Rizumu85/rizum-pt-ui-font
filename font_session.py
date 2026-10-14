@@ -101,8 +101,12 @@ class QtFontApplier:
         # True while this applier is setting fonts, so the live watcher can
         # tell its own FontChange events from Painter's.
         self.applying = False
-        # Runs a callable on the next event-loop turn (set by the panel).
-        self.defer = None
+        # Widgets whose font change waits one event-loop turn. They wait in
+        # this list, not in queued callables, so a close can drop them: a
+        # queued call cannot be cancelled and ran after the plugin closed.
+        self._pending = []
+        # Asks for settle_pending() on the next turn (set by the panel).
+        self.request_settle = None
 
     def build_font(self, state):
         state = FontState.from_value(state)
@@ -179,7 +183,7 @@ class QtFontApplier:
             except Exception:
                 return False
             return self.apply_to_widget(widget)
-        if self.defer is None:
+        if self.request_settle is None:
             return False
         try:
             if widget.property(_PENDING_FONT_PROPERTY):
@@ -187,8 +191,29 @@ class QtFontApplier:
             widget.setProperty(_PENDING_FONT_PROPERTY, True)
         except Exception:
             return False
-        self.defer(lambda: self._settle_foreign_font(widget))
+        self._pending.append(widget)
+        if len(self._pending) == 1:
+            self.request_settle()
         return False
+
+    def settle_pending(self):
+        """Decide the font changes that waited one event-loop turn."""
+        pending, self._pending = self._pending, []
+        for widget in pending:
+            self._settle_foreign_font(widget)
+
+    def forget_pending(self):
+        """Drop the waiting font changes without deciding them (close).
+
+        The mark comes off the widgets that still exist: left set, it would
+        stop them from ever waiting again once the plugin is restarted.
+        """
+        pending, self._pending = self._pending, []
+        for widget in pending:
+            try:
+                widget.setProperty(_PENDING_FONT_PROPERTY, None)
+            except Exception:
+                pass
 
     def _settle_foreign_font(self, widget):
         QFont = self.QtGui.QFont

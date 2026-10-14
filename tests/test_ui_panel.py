@@ -290,6 +290,51 @@ class UiScalePanelTests(unittest.TestCase):
         self.assertEqual(QtGui.QFontInfo(label.font()).pixelSize(), 20)
         self.assertIsNone(label.property("rizumUiFontBaseline"))
 
+    def _late_label_with_a_foreign_font(self, panel):
+        panel.session.preview(plugin.FontState(scale=1.25, family="MiSans"))
+        label = QtWidgets.QLabel("late")
+        self.addCleanup(label.deleteLater)
+        label.show()
+        own = QtGui.QFont(label.font())
+        own.setPixelSize(20)
+        label.setFont(own)
+        return label
+
+    def test_a_foreign_font_is_decided_on_the_next_turn(self):
+        label = self._late_label_with_a_foreign_font(self.panel)
+
+        self.assertTrue(label.property("rizumUiFontPending"))
+        self.assertIsNotNone(label.property("rizumUiFontBaseline"))
+
+        self.app.processEvents()
+
+        self.assertIsNone(label.property("rizumUiFontPending"))
+        self.assertIsNone(label.property("rizumUiFontBaseline"))
+
+    def test_closing_the_panel_drops_the_waiting_font_changes(self):
+        panel = self.panel
+        applier = panel.session.applier
+        label = self._late_label_with_a_foreign_font(panel)
+        self.assertTrue(label.property("rizumUiFontPending"))
+
+        with mock.patch.object(applier, "_settle_foreign_font") as settle:
+            panel.close()
+            self.app.processEvents()
+
+        settle.assert_not_called()
+        self.assertEqual(applier._pending, [])
+        self.assertIsNone(label.property("rizumUiFontPending"))
+
+        # Started again, the plugin can make the same widget wait again.
+        with mock.patch.object(QtCore, "QSettings", return_value=self.settings):
+            restarted = plugin.UiScalePanel()
+        self.addCleanup(restarted.close)
+        restarted.session.preview(plugin.FontState(scale=1.25, family="MiSans"))
+        other = QtGui.QFont(label.font())
+        other.setPixelSize(24)
+        label.setFont(other)
+        self.assertTrue(label.property("rizumUiFontPending"))
+
     def test_sibling_plugin_panels_are_left_to_themselves(self):
         panel = self.panel
         panel.session.preview(plugin.FontState(scale=1.25, family="MiSans"))

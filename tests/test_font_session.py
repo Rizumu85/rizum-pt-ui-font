@@ -71,6 +71,31 @@ class _QApplication:
         return cls.current
 
 
+class _Widget:
+    """A managed widget: it has a recorded baseline and a current font."""
+
+    def __init__(self, baseline, current):
+        self.properties = {"rizumUiFontBaseline": baseline}
+        self.current = current
+        self.deleted = False
+
+    def font(self):
+        self._check()
+        return self.current
+
+    def property(self, name):
+        self._check()
+        return self.properties.get(name)
+
+    def setProperty(self, name, value):
+        self._check()
+        self.properties[name] = value
+
+    def _check(self):
+        if self.deleted:
+            raise RuntimeError("Internal C++ object already deleted.")
+
+
 class _QtGui:
     QFont = _Font
 
@@ -136,6 +161,47 @@ class QtFontApplierTests(unittest.TestCase):
         applied = self._applier().apply_state(FontState(scale=1.25))
 
         self.assertFalse(applied)
+
+    def test_a_foreign_size_waits_for_one_requested_settle(self):
+        applier = self._applier()
+        requests = []
+        applier.request_settle = lambda: requests.append(True)
+        first = _Widget(_Font(points=10.0), _Font(points=20.0))
+        second = _Widget(_Font(points=10.0), _Font(points=20.0))
+
+        applier.widget_font_changed(first)
+        applier.widget_font_changed(first)
+        applier.widget_font_changed(second)
+
+        self.assertEqual(len(requests), 1)
+        self.assertTrue(first.properties["rizumUiFontPending"])
+        self.assertIsNotNone(first.properties["rizumUiFontBaseline"])
+
+        applier.settle_pending()
+
+        # Still at the foreign size a turn later: deliberate, record dropped.
+        for widget in (first, second):
+            self.assertIsNone(widget.properties["rizumUiFontPending"])
+            self.assertIsNone(widget.properties["rizumUiFontBaseline"])
+
+        applier.widget_font_changed(_Widget(_Font(points=10.0), _Font(points=20.0)))
+        self.assertEqual(len(requests), 2)
+
+    def test_forgetting_drops_the_waiting_widgets_undecided(self):
+        applier = self._applier()
+        applier.request_settle = lambda: None
+        alive = _Widget(_Font(points=10.0), _Font(points=20.0))
+        deleted = _Widget(_Font(points=10.0), _Font(points=20.0))
+        applier.widget_font_changed(alive)
+        applier.widget_font_changed(deleted)
+        deleted.deleted = True
+
+        applier.forget_pending()
+        applier.settle_pending()
+
+        self.assertEqual(applier._pending, [])
+        self.assertIsNone(alive.properties["rizumUiFontPending"])
+        self.assertIsNotNone(alive.properties["rizumUiFontBaseline"])
 
 
 if __name__ == "__main__":
