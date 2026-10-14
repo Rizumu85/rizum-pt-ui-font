@@ -1428,7 +1428,15 @@ def _install_compact_dock_tracker(widget):
         def __init__(self, surface):
             super().__init__(surface)
             self._dock_address = 0
-            self._pending = False
+            # The refresh waits in a timer that dies with the tracker, not
+            # in QTimer.singleShot(0, self, ...): Painter removes a plugin's
+            # dock while a refresh is waiting, and PySide never releases the
+            # callable of a zero-delay call it drops, which kept the tracker
+            # alive after the close.
+            self._refresh_timer = QtCore.QTimer(self)
+            self._refresh_timer.setSingleShot(True)
+            self._refresh_timer.setInterval(0)
+            self._refresh_timer.timeout.connect(self._refresh)
 
         def eventFilter(self, watched, event):
             if event.type() in (
@@ -1441,13 +1449,10 @@ def _install_compact_dock_tracker(widget):
 
         @QtCore.Slot()
         def schedule(self):
-            if self._pending:
-                return
-            self._pending = True
-            QtCore.QTimer.singleShot(0, self, self._refresh)
+            if not self._refresh_timer.isActive():
+                self._refresh_timer.start()
 
         def _refresh(self):
-            self._pending = False
             surface = self.parent()
             if not _is_qt_object_alive(surface):
                 return
