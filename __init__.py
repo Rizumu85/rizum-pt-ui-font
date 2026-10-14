@@ -592,6 +592,14 @@ class UiScalePanel:
         except Exception:
             return False
 
+    def later(self, delay, callback):
+        """Run ``callback`` after ``delay`` ms, unless the panel closes first."""
+        timer = self.QtCore.QTimer(self._timers)
+        timer.setSingleShot(True)
+        timer.timeout.connect(callback)
+        timer.timeout.connect(timer.deleteLater)
+        timer.start(delay)
+
     def close(self):
         app = self.QtWidgets.QApplication.instance()
         if app is not None:
@@ -904,10 +912,10 @@ def start_plugin():
         _connect_gui_ready_refresh()
         # Handles enabling the plugin after Painter's one-shot GUI-ready event
         # has already fired. During cold startup the event wins this race.
-        _PANEL.QtCore.QTimer.singleShot(5000, _finalize_startup_surface)
+        _PANEL.later(5000, _finalize_startup_surface)
     if _STARTUP_VISIBILITY_SETTLING:
         for delay in (0, 1000, 4000, 8000):
-            _PANEL.QtCore.QTimer.singleShot(
+            _PANEL.later(
                 delay,
                 lambda final=delay == 8000: _enforce_startup_hidden(final),
             )
@@ -989,7 +997,7 @@ def _on_gui_ready(_event):
         return
     # Run after the remaining GUI-started callbacks so Painter's final host
     # font and stylesheet cannot overwrite the restored component metrics.
-    _PANEL.QtCore.QTimer.singleShot(0, _finalize_startup_surface)
+    _PANEL.later(0, _finalize_startup_surface)
     _disconnect_gui_ready_refresh()
 
 
@@ -1045,7 +1053,7 @@ def _finalize_startup_surface():
         _DOCK.setWindowOpacity(0.0)
         _DOCK.show()
         _sync_startup_layout()
-        _PANEL.QtCore.QTimer.singleShot(0, _stabilize_startup_surface)
+        _PANEL.later(0, _stabilize_startup_surface)
     except Exception:
         _STARTUP_SURFACE_PREPARING = False
         _PANEL.widget.setUpdatesEnabled(True)
@@ -1059,7 +1067,7 @@ def _stabilize_startup_surface():
     _sync_startup_layout()
     # QDockWidget restores floating geometry asynchronously after show().
     # Keep the transparent window alive through that host-side resize pass.
-    _PANEL.QtCore.QTimer.singleShot(300, _prepare_startup_reveal)
+    _PANEL.later(300, _prepare_startup_reveal)
 
 
 def _prepare_startup_reveal():
@@ -1071,7 +1079,7 @@ def _prepare_startup_reveal():
     _DOCK.update()
     # Give the hidden top-level backing store time to paint the children.
     # Revealing on the next event-loop turn can expose one blank dock frame.
-    _PANEL.QtCore.QTimer.singleShot(100, _commit_startup_reveal)
+    _PANEL.later(100, _commit_startup_reveal)
 
 
 def _commit_startup_reveal():
@@ -1218,7 +1226,7 @@ def _resize_floating_dock():
         pass
     try:
         if _PANEL is not None:
-            _PANEL.QtCore.QTimer.singleShot(0, _resize_floating_dock_later)
+            _PANEL.later(0, _resize_floating_dock_later)
     except Exception:
         pass
 

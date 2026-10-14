@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -584,6 +585,48 @@ class DockVisibilityTests(unittest.TestCase):
         self.assertEqual(self.panel.scale.value(), 1.0)
         self.assertFalse(self.panel.save_btn.isDirty())
         self.assertEqual(plugin._setting_bool(self.settings.value("panel_visible"), True), False)
+
+    def test_deferred_work_does_not_outlive_the_panel(self):
+        ran = []
+        self.panel.later(0, lambda: ran.append("open"))
+        self.app.processEvents()
+        self.assertEqual(ran, ["open"])
+
+        self.panel.later(0, lambda: ran.append("closed"))
+        self.panel.close()
+        self.app.processEvents()
+        self.assertEqual(ran, ["open"])
+
+    def _begin_startup_reveal(self):
+        for name, value in (
+            ("_STARTUP_PANEL_VISIBLE", True),
+            ("_STARTUP_FIRST_RUN", False),
+            ("_STARTUP_SURFACE_READY", False),
+        ):
+            patcher = mock.patch.object(plugin, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.addCleanup(self.app.setProperty, plugin._GUI_READY_PROPERTY, None)
+        plugin._finalize_startup_surface()
+        self.assertTrue(plugin._STARTUP_SURFACE_PREPARING)
+
+    def test_the_startup_reveal_runs_to_its_end(self):
+        with mock.patch.dict(sys.modules, {"substance_painter": mock.Mock()}):
+            self._begin_startup_reveal()
+            QtTest.QTest.qWait(600)
+
+        self.assertTrue(plugin._STARTUP_SURFACE_READY)
+        self.assertFalse(plugin._STARTUP_SURFACE_PREPARING)
+
+    def test_closing_the_panel_stops_the_startup_reveal(self):
+        self._begin_startup_reveal()
+
+        with mock.patch.object(plugin, "_sync_startup_layout") as sync:
+            self.panel.close()
+            QtTest.QTest.qWait(600)
+
+        sync.assert_not_called()
+        self.assertFalse(plugin._STARTUP_SURFACE_READY)
 
 
 if __name__ == "__main__":
