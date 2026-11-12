@@ -89,10 +89,11 @@ def _log_warning(message):
 
 
 def _load_ui_kit():
-    """Return the compact UI kit used by the panel."""
+    """Return the compact UI kit used by the panel, or None for plain Qt."""
     try:
         return _load_bundled_ui_kit(_PLUGIN_ROOT)
-    except Exception:
+    except Exception as error:
+        _log_warning(f"UI kit not usable, showing the plain panel: {error}")
         return None
 
 
@@ -469,10 +470,8 @@ class UiScalePanel:
                     pass
 
     def _connect_live_sync(self):
-        # Auto-sync the UI font live as the user adjusts size/font. Hinting is
-        # connected too where the widget exposes a toggled signal (fallback
-        # QCheckBox); the prettier mock checkbox has no signal and is only
-        # applied on save.
+        # Every control previews live. The plain QCheckBox has a toggled
+        # signal; the kit's mock checkbox has none, so its clicks are wrapped.
         try:
             self.scale.valueChanged.connect(self._apply_font)
         except Exception:

@@ -492,6 +492,56 @@ class UiScalePanelTests(unittest.TestCase):
         self.assertAlmostEqual(late.font().pointSizeF(), base_size, places=2)
 
 
+class PlainQtFallbackTests(unittest.TestCase):
+    """Without a usable UI kit the panel is plain Qt, and the log says why."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        settings = QtCore.QSettings(
+            os.path.join(self.temp_dir.name, "settings.ini"),
+            QtCore.QSettings.Format.IniFormat,
+        )
+        with (
+            mock.patch.object(QtCore, "QSettings", return_value=settings),
+            mock.patch.object(
+                plugin,
+                "_load_bundled_ui_kit",
+                side_effect=ImportError("rizum_ui lacks make_spin_input"),
+            ),
+            mock.patch.object(plugin, "_log_warning") as self.warning,
+        ):
+            self.panel = plugin.UiScalePanel()
+        self.addCleanup(self.panel.widget.deleteLater)
+        self.addCleanup(self.panel.close)
+
+    def test_the_log_names_what_was_wrong_with_the_kit(self):
+        self.assertIsNone(self.panel.ui)
+        self.assertIsInstance(self.panel.scale, QtWidgets.QDoubleSpinBox)
+        self.warning.assert_called_once()
+        self.assertIn("make_spin_input", self.warning.call_args.args[0])
+
+    def test_save_feedback_fades_and_stops_with_the_panel(self):
+        panel = self.panel
+        panel.scale.setValue(1.1)
+
+        panel.save()
+
+        self.assertEqual(panel._save_feedback.text(), panel._tr("saved"))
+        self.assertFalse(panel._save_feedback.isHidden())
+        self.assertIsNotNone(panel._save_feedback.graphicsEffect())
+        timers = panel._timers.findChildren(QtCore.QTimer)
+        self.assertTrue(any(timer.isActive() for timer in timers))
+
+        panel.close()
+
+        self.assertFalse(any(timer.isActive() for timer in timers))
+
+
 class DockVisibilityTests(unittest.TestCase):
     """The unsaved preview must survive tab switches and only revert on a real close."""
 

@@ -43,24 +43,33 @@ class UiKitCandidate:
 
 
 def load_ui_kit(plugin_root, env=None):
-    """Load the bundled UI kit, with an opt-in sibling source override."""
+    """Load the bundled UI kit, with an opt-in sibling source override.
+
+    Raises ImportError naming what is wrong with the last kit tried, so the
+    panel can say why it fell back to plain Qt widgets.
+    """
     env = os.environ if env is None else env
     plugin_root = Path(plugin_root).resolve()
 
+    problem = f"no {UI_KIT_MODULE} folder in {plugin_root}"
     for candidate in candidate_roots(plugin_root, env):
-        if not (candidate.root / UI_KIT_MODULE).exists():
+        kit_dir = candidate.root / UI_KIT_MODULE
+        if not kit_dir.exists():
             continue
         _prefer_root(candidate.root)
         _clear_loaded_ui_kit()
         importlib.invalidate_caches()
         try:
             module = importlib.import_module(UI_KIT_MODULE)
-        except Exception:
+        except Exception as error:
+            problem = f"{kit_dir} failed to import ({error!r})"
             continue
-        if missing_ui_kit_features(module):
+        missing = missing_ui_kit_features(module)
+        if missing:
+            problem = f"{kit_dir} lacks {', '.join(missing)}"
             continue
         return module
-    return None
+    raise ImportError(problem)
 
 
 def load_localization(plugin_root, env=None):
