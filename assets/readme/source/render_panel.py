@@ -27,7 +27,7 @@ def main():
         )
         with (
             mock.patch.object(QtCore, "QSettings", return_value=settings),
-            mock.patch.object(plugin, "_read_painter_log_language", return_value="en"),
+            mock.patch.object(plugin, "_read_painter_language", return_value="en"),
         ):
             panel = plugin.UiScalePanel()
         panel.scale.setValue(1.10)
