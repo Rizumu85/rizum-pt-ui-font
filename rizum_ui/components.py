@@ -6,6 +6,8 @@ import weakref
 from html import escape
 from pathlib import Path
 
+from PySide6 import QtCore
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -1799,76 +1801,99 @@ def compact_top_controls_width(
     )
 
 
+class _RowHoverFilter(QtCore.QObject):
+    """Keeps a row's hover property while the pointer crosses its children.
+
+    One class for every row, and no wrapper of the widgets it watches. It
+    used to be a class made per call whose methods closed over the row and
+    the host it was stored on; the collector does not follow an instance to
+    such a class, so every row built stayed alive after its panel was
+    destroyed (measured: 20 of 20 export rows after delete and collection).
+    """
+
+    def __init__(self, host, row, watched, property_name):
+        super().__init__(host)
+        self._row = weakref.ref(row)
+        self._watched = [weakref.ref(widget) for widget in watched]
+        self._property_name = property_name
+        # A timer that dies with the filter, not QTimer.singleShot(0, ...):
+        # a row destroyed in the turn of its Leave left that call behind,
+        # and it raised on the deleted widgets.
+        self._refresh_timer = QtCore.QTimer(self)
+        self._refresh_timer.setSingleShot(True)
+        self._refresh_timer.setInterval(0)
+        self._refresh_timer.timeout.connect(self.refresh_hovered)
+
+    def set_row_property(self, name, value):
+        row = self._row()
+        if row is None or row.property(name) == value:
+            return
+        row.setProperty(name, value)
+        row.style().unpolish(row)
+        row.style().polish(row)
+        row.update()
+
+    def set_hovered(self, is_hovered):
+        global _ACTIVE_HOVER_FILTER_REF
+        active_filter = (
+            _ACTIVE_HOVER_FILTER_REF()
+            if _ACTIVE_HOVER_FILTER_REF is not None
+            else None
+        )
+        if is_hovered:
+            if active_filter is not None and active_filter is not self:
+                try:
+                    active_filter.set_row_property(
+                        active_filter._property_name,
+                        False,
+                    )
+                except RuntimeError:
+                    pass
+            _ACTIVE_HOVER_FILTER_REF = weakref.ref(self)
+        elif active_filter is self:
+            _ACTIVE_HOVER_FILTER_REF = None
+        self.set_row_property(self._property_name, is_hovered)
+
+    def refresh_hovered(self):
+        widgets = [reference() for reference in self._watched]
+        self.set_hovered(
+            any(
+                _is_qt_object_alive(widget) and widget.underMouse()
+                for widget in widgets
+            )
+        )
+
+    def eventFilter(self, obj, event):
+        event_type = event.type()
+        if event_type in (
+            QtCore.QEvent.Type.Enter,
+            QtCore.QEvent.Type.HoverEnter,
+            QtCore.QEvent.Type.HoverMove,
+        ):
+            self.set_hovered(True)
+        elif event_type in (
+            QtCore.QEvent.Type.Leave,
+            QtCore.QEvent.Type.HoverLeave,
+        ):
+            self._refresh_timer.start()
+        elif event_type in (
+            QtCore.QEvent.Type.MouseButtonPress,
+            QtCore.QEvent.Type.MouseButtonRelease,
+        ) and event.button() == QtCore.Qt.MouseButton.LeftButton:
+            self.set_row_property(
+                "pressed",
+                event_type == QtCore.QEvent.Type.MouseButtonPress,
+            )
+        return False
+
+
 def bind_hover_state(host, row, *widgets, property_name="hovered"):
     """Keep a row hover property stable while moving across child widgets."""
-    from PySide6 import QtCore
-
     watched = [widget for widget in (host, row, *widgets) if widget is not None]
-
-    class _TreeHoverFilter(QtCore.QObject):
-        def __init__(self):
-            super().__init__(host)
-            self._property_name = property_name
-
-        def set_row_property(self, name, value):
-            if row.property(name) == value:
-                return
-            row.setProperty(name, value)
-            row.style().unpolish(row)
-            row.style().polish(row)
-            row.update()
-
-        def set_hovered(self, is_hovered):
-            global _ACTIVE_HOVER_FILTER_REF
-            active_filter = (
-                _ACTIVE_HOVER_FILTER_REF()
-                if _ACTIVE_HOVER_FILTER_REF is not None
-                else None
-            )
-            if is_hovered:
-                if active_filter is not None and active_filter is not self:
-                    try:
-                        active_filter.set_row_property(
-                            active_filter._property_name,
-                            False,
-                        )
-                    except RuntimeError:
-                        pass
-                _ACTIVE_HOVER_FILTER_REF = weakref.ref(self)
-            elif active_filter is self:
-                _ACTIVE_HOVER_FILTER_REF = None
-            self.set_row_property(property_name, is_hovered)
-
-        def refresh_hovered(self):
-            self.set_hovered(any(widget.underMouse() for widget in watched))
-
-        def eventFilter(self, obj, event):
-            event_type = event.type()
-            if event_type in (
-                QtCore.QEvent.Type.Enter,
-                QtCore.QEvent.Type.HoverEnter,
-                QtCore.QEvent.Type.HoverMove,
-            ):
-                self.set_hovered(True)
-            elif event_type in (
-                QtCore.QEvent.Type.Leave,
-                QtCore.QEvent.Type.HoverLeave,
-            ):
-                QtCore.QTimer.singleShot(0, self.refresh_hovered)
-            elif event_type in (
-                QtCore.QEvent.Type.MouseButtonPress,
-                QtCore.QEvent.Type.MouseButtonRelease,
-            ) and event.button() == QtCore.Qt.MouseButton.LeftButton:
-                self.set_row_property(
-                    "pressed",
-                    event_type == QtCore.QEvent.Type.MouseButtonPress,
-                )
-            return False
-
     for widget in watched:
         widget.setMouseTracking(True)
         widget.setAttribute(QtCore.Qt.WidgetAttribute.WA_Hover, True)
-    hover_filter = _TreeHoverFilter()
+    hover_filter = _RowHoverFilter(host, row, watched, property_name)
     for widget in watched:
         widget.installEventFilter(hover_filter)
     host._rizum_hover_filter = hover_filter
