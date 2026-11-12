@@ -55,7 +55,7 @@ python distribution.py          # validate this checkout
 python distribution.py build    # stage build/rizum-pt-ui-font/, validate it, and zip it
 ```
 
-Validation checks version consistency, bundled UI files, icons, translations, font notices, and cache-file hygiene. The `build` command copies only the runtime files (no tests, README assets, or the Chinese README) into `build/`, runs the release checks on that folder, and writes `build/rizum-pt-ui-font-<version>.zip`.
+Validation checks version consistency, bundled UI files, icons, translations, font notices, README links, and cache-file hygiene. The `build` command copies what a user's copy holds (the runtime files, the license and font notices, both READMEs and their banner; no tests, development notes, or image sources) into `build/`, runs the release checks on that folder, and writes `build/rizum-pt-ui-font-<version>.zip`.
 
 The panel image can be regenerated with `python assets/readme/source/render_panel.py` using PySide6. It uses temporary settings and the bundled UI kit.
 

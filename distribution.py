@@ -12,24 +12,35 @@ from pathlib import Path
 
 DISTRIBUTION_NAME = "rizum-pt-ui-font"
 
-REQUIRED_PATHS = (
-    ".gitignore",
-    "CONTEXT.md",
-    "distribution.py",
+# What a user's copy holds: the runtime files, the licence and notices, and
+# both READMEs with the banner they show. A README must not link to a file
+# that is left out, which _check_document_links enforces.
+SHIPPED_PATHS = (
+    "__init__.py",
     "font_catalog.py",
     "font_session.py",
-    "README.md",
-    "THIRD_PARTY_NOTICES.md",
-    "__init__.py",
+    "ui_kit_loader.py",
     "plugin.json",
     "fonts",
     "i18n",
     "icons",
     "rizum_ui",
     "rizum_ui_vendor_manifest.json",
-    "ui_kit_loader.py",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "README.md",
+    "README.zh-CN.md",
+    "assets/readme/hero.png",
 )
 
+# What a checkout must hold on top of that, and a user's copy must not.
+CHECKOUT_ONLY_PATHS = (
+    ".gitignore",
+    "CONTEXT.md",
+    "distribution.py",
+)
+
+LINK_PATTERN = re.compile(r"""\]\(([^)\s]+)\)|\bsrc=["']([^"']+)["']""")
 ICON_PATTERN = re.compile(r"""["']([^"']+\.svg)["']""")
 PLUGIN_VERSION_PATTERN = re.compile(r"""^PLUGIN_VERSION\s*=\s*["']([^"']+)["']""", re.MULTILINE)
 
@@ -87,27 +98,29 @@ class FilesystemAdapter:
 def validate_distribution(root=None, fs=None, release=False):
     """Return a report for the plugin's standalone distribution invariants.
 
-    ``release`` enables the checks that only make sense on a staged release
-    folder (for example that development-only files were left out); a source
-    checkout is expected to carry those files.
+    ``release`` checks a staged release folder, which holds SHIPPED_PATHS
+    and nothing else; without it a source checkout is checked, which also
+    holds CHECKOUT_ONLY_PATHS and whatever development needs.
     """
     root = Path(root or Path(__file__).resolve().parent).resolve()
     fs = FilesystemAdapter(root) if fs is None else fs
     issues = []
 
-    _check_required_paths(fs, issues)
+    required = SHIPPED_PATHS if release else SHIPPED_PATHS + CHECKOUT_ONLY_PATHS
+    _check_required_paths(fs, issues, required)
     _check_version_sync(fs, issues)
     _check_i18n_catalogs(fs, issues)
     _check_vendor_manifest(fs, issues)
     _check_referenced_icons(fs, issues)
     _check_misans_notice(fs, issues)
+    _check_document_links(fs, issues)
     _check_release_hygiene(fs, issues, release=release)
 
     return DistributionReport(root=root, issues=tuple(issues))
 
 
 def build_distribution(root=None, out_dir=None):
-    """Stage the runtime files into ``build/``, validate them, and zip them.
+    """Stage SHIPPED_PATHS into ``build/``, validate them, and zip them.
 
     Returns ``(report, staged_dir, zip_path)``; ``zip_path`` is ``None`` when
     the staged folder failed validation.
@@ -123,7 +136,7 @@ def build_distribution(root=None, out_dir=None):
     def _skip_cache(_directory, names):
         return [name for name in names if name == "__pycache__" or name.endswith((".pyc", ".pyo"))]
 
-    for relative in REQUIRED_PATHS:
+    for relative in SHIPPED_PATHS:
         source = root / relative
         if not source.exists():
             continue
@@ -131,6 +144,7 @@ def build_distribution(root=None, out_dir=None):
         if source.is_dir():
             shutil.copytree(source, target, ignore=_skip_cache)
         else:
+            target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, target)
 
     report = validate_distribution(staged, release=True)
@@ -155,8 +169,8 @@ def _read_version(root):
         return ""
 
 
-def _check_required_paths(fs, issues):
-    for relative in REQUIRED_PATHS:
+def _check_required_paths(fs, issues, required):
+    for relative in required:
         if not fs.exists(relative):
             issues.append(DistributionIssue("missing-path", "Required distribution path is missing", relative))
 
@@ -264,27 +278,45 @@ def _check_misans_notice(fs, issues):
         issues.append(DistributionIssue("misans-notice", "Third-party notice does not mention MiSans", "THIRD_PARTY_NOTICES.md"))
 
 
+def _check_document_links(fs, issues):
+    """Every file a shipped Markdown document links to exists beside it."""
+    for document in SHIPPED_PATHS:
+        if not document.endswith(".md") or not fs.exists(document):
+            continue
+        for match in LINK_PATTERN.finditer(fs.read_text(document)):
+            target = (match.group(1) or match.group(2)).split("#", 1)[0]
+            if not target or "://" in target:
+                continue
+            if not fs.exists(target):
+                issues.append(DistributionIssue("broken-link", f"{document} links to a missing file", target))
+
+
+def _is_shipped(relative):
+    path = relative.as_posix()
+    return any(path == shipped or path.startswith(shipped + "/") for shipped in SHIPPED_PATHS)
+
+
 def _check_release_hygiene(fs, issues, release=False):
-    if release:
-        for relative in ("README.zh-CN.md", "tests", "assets"):
-            if fs.exists(relative):
-                issues.append(DistributionIssue("dev-only-file", "Development-only path should not ship", relative))
-
-    try:
-        gitignore = fs.read_text(".gitignore")
-    except Exception:
-        gitignore = ""
-    if "build/" not in gitignore:
-        issues.append(DistributionIssue("gitignore", "build/ is not ignored", ".gitignore"))
-
     if not release:
-        # A source checkout accumulates __pycache__ as soon as tests run;
-        # only the staged release folder must be free of it.
+        try:
+            gitignore = fs.read_text(".gitignore")
+        except Exception:
+            gitignore = ""
+        if "build/" not in gitignore:
+            issues.append(DistributionIssue("gitignore", "build/ is not ignored", ".gitignore"))
         return
+
+    # Only the staged folder is held to this: a source checkout gathers
+    # __pycache__ as soon as tests run and carries the development files.
+    unshipped = set()
     for path in fs.iter_files():
         relative = path.relative_to(fs.root)
         if "__pycache__" in relative.parts or path.suffix == ".pyc":
             issues.append(DistributionIssue("cache-file", "Python cache file should not ship", str(relative)))
+        elif not _is_shipped(relative):
+            unshipped.add(relative.parts[0])
+    for name in sorted(unshipped):
+        issues.append(DistributionIssue("dev-only-file", "Development-only path should not ship", name))
 
 
 def main(argv=None):

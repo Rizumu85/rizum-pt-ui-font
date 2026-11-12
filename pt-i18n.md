@@ -6,7 +6,7 @@
 
 ## Scope
 
-This file records the localization approach used by `rizum-pt-ui-font`. UI resizing and text-fit behavior is intentionally left for `rizum-pt-ui-prettier`, because this plugin should not own shared layout primitives.
+This file records the localization approach used by `rizum-pt-ui-font`. Fitting the panel to longer translations is done by the shared primitives of `rizum-pt-ui-prettier` (`compact_label_width`, `compact_footer_button_width`, `update_inline_checkbox_row`), which the panel calls on every font or scale change; this plugin does not own layout primitives.
 
 ## Supported Languages
 
@@ -43,7 +43,3 @@ resolved against the available `i18n/*.json` files, falling back to English.
 - A plugin-owned `QSettings("Rizum", "PainterUiFont").value("language")` override
 - Environment-variable language overrides
 - A local `language.txt` override file
-
-## Pending: Text-Fit Layout
-
-Localized strings can be longer than the English source text. The current panel uses fixed label and footer button widths, so German, French, Italian, Spanish, and Portuguese can require more space. The layout adaptation should be fixed in `rizum-pt-ui-prettier` so all compact Painter panels benefit from the same text-fit behavior.

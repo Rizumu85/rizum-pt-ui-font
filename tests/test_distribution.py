@@ -30,13 +30,49 @@ class DistributionTests(unittest.TestCase):
             self.assertIsNotNone(zip_path)
             self.assertTrue((staged / "__init__.py").exists())
             self.assertTrue((staged / "fonts" / "MiSans-Regular.ttf").exists())
-            self.assertFalse((staged / "README.zh-CN.md").exists())
-            self.assertFalse((staged / "tests").exists())
-            self.assertFalse((staged / "assets").exists())
+            self.assertTrue((staged / "LICENSE").exists())
+            # Both READMEs ship with the one image they show, nothing else
+            # from assets/.
+            self.assertTrue((staged / "README.zh-CN.md").exists())
+            self.assertEqual(
+                [path.name for path in (staged / "assets").rglob("*") if path.is_file()],
+                ["hero.png"],
+            )
+            for name in ("tests", ".gitignore", "CONTEXT.md", "distribution.py"):
+                self.assertFalse((staged / name).exists(), name)
             with zipfile.ZipFile(zip_path) as archive:
                 names = archive.namelist()
             self.assertIn("rizum-pt-ui-font/plugin.json", names)
             self.assertFalse(any("__pycache__" in name for name in names))
+
+    def test_a_shipped_readme_may_only_link_to_shipped_files(self):
+        with tempfile.TemporaryDirectory() as out_dir:
+            _report, staged, _zip_path = distribution.build_distribution(ROOT, out_dir)
+            (staged / "assets" / "readme" / "hero.png").unlink()
+
+            report = distribution.validate_distribution(staged, release=True)
+
+        self.assertEqual(
+            [(issue.code, issue.path) for issue in report.issues],
+            [
+                ("missing-path", "assets/readme/hero.png"),
+                ("broken-link", "assets/readme/hero.png"),
+                ("broken-link", "assets/readme/hero.png"),
+            ],
+        )
+
+    def test_a_staged_folder_holds_nothing_but_shipped_files(self):
+        with tempfile.TemporaryDirectory() as out_dir:
+            _report, staged, _zip_path = distribution.build_distribution(ROOT, out_dir)
+            (staged / "assets" / "readme" / "panel.png").write_bytes(b"")
+            (staged / "CONTEXT.md").write_text("notes", encoding="utf-8")
+
+            report = distribution.validate_distribution(staged, release=True)
+
+        self.assertEqual(
+            [(issue.code, issue.path) for issue in report.issues],
+            [("dev-only-file", "CONTEXT.md"), ("dev-only-file", "assets")],
+        )
 
 
 if __name__ == "__main__":
