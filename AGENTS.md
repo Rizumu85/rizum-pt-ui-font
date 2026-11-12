@@ -14,3 +14,11 @@ These rules come from the user.
    the user asked for this check so it does not happen again. The rule behind
    it is in the UI kit's `docs/integration.md`, "Painter's Widgets And
    Painter's Exit".
+
+2. **Commit and push every session.** Every conversation's changes are
+   committed and pushed to `origin` as a backup, split by concern (cleanup,
+   refactor, fix, feature, docs) instead of one combined commit. This is the
+   user's rule in the other Rizum plugin repositories; it was written down
+   here on 2026-11-12, when the user let the agent align the rules across
+   the plugins. A release (version bump, package, update manifest) is a
+   separate step and waits for the user.
