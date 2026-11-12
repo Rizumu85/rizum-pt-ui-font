@@ -15,7 +15,6 @@ EXIT_GUARD_MODULE = "_rizum_ui_font_exit_guard"
 SIBLING_OVERRIDE_ENV = "RIZUM_UI_FONT_USE_SIBLING_PRETTIER"
 
 REQUIRED_UI_KIT_FEATURES = (
-    "ActionButton",
     "AnimatedSaveButton",
     "SecondaryActionButton",
     "apply_compact_dock_surface",
@@ -32,7 +31,6 @@ REQUIRED_UI_KIT_FEATURES = (
     "make_inline_checkbox_row",
     "make_mock_checkbox",
     "make_spin_input",
-    "set_compact_footer_button_width",
     "update_compact_field_row",
     "update_inline_checkbox_row",
 )

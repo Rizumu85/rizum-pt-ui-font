@@ -551,13 +551,12 @@ class UiScalePanel:
         label = getattr(self, "_save_feedback", None)
         if label is None:
             return
-        QtGui = self.QtGui
         QtCore = self.QtCore
         label.setText(self._tr("saved"))
         # Use QGraphicsOpacityEffect for child widget fade (windowOpacity
         # only works on top-level windows).
         try:
-            effect = QtGui.QGraphicsOpacityEffect(label)
+            effect = self.QtWidgets.QGraphicsOpacityEffect(label)
             effect.setOpacity(1.0)
             label.setGraphicsEffect(effect)
         except Exception:
@@ -577,9 +576,9 @@ class UiScalePanel:
             anim.setEasingCurve(QtCore.QEasingCurve.Type.OutCubic)
             anim.finished.connect(label.hide)
             self._save_feedback_anim = anim
-            QtCore.QTimer.singleShot(800, anim.start)
+            self.later(800, anim.start)
         else:
-            QtCore.QTimer.singleShot(1400, label.hide)
+            self.later(1400, label.hide)
 
     def reset(self):
         self.session.revert_to(FontState(), before_apply=self._set_controls)
@@ -667,34 +666,6 @@ class UiScalePanel:
             minimum=int(round(120 * scale)),
             maximum=int(round(150 * scale)),
             padding=int(round(78 * scale)),
-        )
-
-    def _font_control_width(self):
-        if self.ui is None:
-            return 160
-
-        labels = []
-        try:
-            labels.extend(str(item[0]) for item in self.font_combo._items)
-        except Exception:
-            pass
-        try:
-            current_text = self.font_combo.currentText()
-        except Exception:
-            current_text = ""
-        if current_text:
-            labels.append(current_text)
-        if not labels:
-            labels = [self._tr("system_default")]
-
-        return max(
-            self.ui.compact_text_width(
-                text,
-                widget=self.font_combo,
-                minimum=0,
-                padding=46,
-            )
-            for text in labels
         )
 
     def _apply_compact_heights(self, scale):
@@ -1280,7 +1251,10 @@ def _make_live_font_watcher_class():
                 if self._is_host_widget(obj):
                     self._applier.apply_to_widget(obj)
             elif kind == self._FONT_CHANGE:
-                if self._is_host_widget(obj):
+                # Each preview step raises one FontChange per widget while
+                # the applier is at work, and it ignores those: skip the
+                # ancestor walk for them.
+                if not self._applier.applying and self._is_host_widget(obj):
                     self._applier.widget_font_changed(obj)
             return False
 
