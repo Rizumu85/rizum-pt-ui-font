@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Mapping
 from types import MappingProxyType
 
@@ -1270,6 +1271,32 @@ class AnimatedSaveButton(QtWidgets.QAbstractButton):
         painter.end()
 
 
+def _device_outline(
+    painter: QtGui.QPainter, rect: QtCore.QRectF, width: float = 1.0
+) -> tuple[QtCore.QRectF, float]:
+    """`rect` and an outline's width on whole device pixels.
+
+    Both in the painter's coordinates. At a fractional display scale (Windows
+    at 112.5 % or 125 %) a 1 px outline on half-pixel coordinates covers one
+    device pixel on some sides and parts of two on others, so its weight and
+    colour change around the control (user report, 2026-11-13).
+    """
+    transform = painter.deviceTransform()
+    scale = transform.m11()
+    plain = transform.isAffine() and transform.m12() == 0 and transform.m21() == 0
+    if not plain or scale <= 0 or abs(transform.m22() - scale) > 1e-6:
+        return QtCore.QRectF(rect), width
+    # Half a pixel goes down: at 150 % the line stays a hairline.
+    line = max(1.0, float(math.floor(width * scale + 0.49)))
+    device = transform.mapRect(QtCore.QRectF(rect))
+    outer = QtCore.QRectF(
+        QtCore.QPointF(math.ceil(device.left() - 0.01), math.ceil(device.top() - 0.01)),
+        QtCore.QPointF(math.floor(device.right() + 0.01), math.floor(device.bottom() + 0.01)),
+    )
+    inverse, _invertible = transform.inverted()
+    return inverse.mapRect(outer), line / scale
+
+
 class ShortcutCaptureField(QtWidgets.QFrame):
     """Painted shortcut field with stable capture, clear, and conflict states."""
 
@@ -1305,6 +1332,7 @@ class ShortcutCaptureField(QtWidgets.QFrame):
         self._capturing = False
         self._conflicted = False
         self._compact_height = self.BASE_HEIGHT
+        self._minimum_width = 0
         self._hovered = False
         self._hover_clear = False
         self._pressed_clear = False
@@ -1355,8 +1383,18 @@ class ShortcutCaptureField(QtWidgets.QFrame):
         self.refreshMetrics()
         self.update()
 
+    def setMinimumFieldWidth(self, width: int) -> None:
+        """The width the field keeps while its content is narrower.
+
+        For a column of controls of one width. The field sets its own width
+        again on every capture and change, so a caller's setFixedWidth lasts
+        only until the next key (user report, 2026-11-13).
+        """
+        self._minimum_width = max(0, int(width))
+        self.refreshMetrics()
+
     def refreshMetrics(self) -> None:
-        self.setFixedWidth(self.sizeHint().width())
+        self.setFixedWidth(max(self.sizeHint().width(), self._minimum_width))
         self.updateGeometry()
 
     def _scale(self) -> float:
@@ -1543,6 +1581,7 @@ class ShortcutCaptureField(QtWidgets.QFrame):
         theme = default_theme
         radius = float(self._scaled(self._visual_style.get("field_radius", 6)))
         rect = QtCore.QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        outer, line = _device_outline(painter, QtCore.QRectF(self.rect()))
 
         background = QtGui.QColor(
             self._visual_style.get("control", theme.surface_control)
@@ -1552,7 +1591,7 @@ class ShortcutCaptureField(QtWidgets.QFrame):
             background = QtGui.QColor(hover) if hover else background.lighter(112)
         painter.setPen(QtCore.Qt.PenStyle.NoPen)
         painter.setBrush(background)
-        painter.drawRoundedRect(rect, radius, radius)
+        painter.drawRoundedRect(outer, radius, radius)
 
         border_color = None
         if self._capturing:
@@ -1564,9 +1603,20 @@ class ShortcutCaptureField(QtWidgets.QFrame):
         elif self._visual_style.get("border"):
             border_color = QtGui.QColor(self._visual_style["border"])
         if border_color is not None:
-            painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
-            painter.setPen(QtGui.QPen(border_color, 1))
-            painter.drawRoundedRect(rect, radius, radius)
+            # A ring instead of a pen, with half the line's width taken off
+            # the inner radius instead of all of it: a one-pixel arc is spread
+            # over two pixels and reads fainter than the straight sides, so
+            # the corners are a fifth fuller.
+            ring = QtGui.QPainterPath()
+            ring.addRoundedRect(outer, radius, radius)
+            hole = QtGui.QPainterPath()
+            inner_radius = max(0.0, radius - line / 2)
+            hole.addRoundedRect(
+                outer.adjusted(line, line, -line, -line), inner_radius, inner_radius
+            )
+            painter.setPen(QtCore.Qt.PenStyle.NoPen)
+            painter.setBrush(border_color)
+            painter.drawPath(ring.subtracted(hole))
 
         text = self._display_text()
         if self._conflicted and not self._capturing:
