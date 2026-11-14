@@ -1332,7 +1332,6 @@ class ShortcutCaptureField(QtWidgets.QFrame):
         self._capturing = False
         self._conflicted = False
         self._compact_height = self.BASE_HEIGHT
-        self._minimum_width = 0
         self._hovered = False
         self._hover_clear = False
         self._pressed_clear = False
@@ -1383,18 +1382,13 @@ class ShortcutCaptureField(QtWidgets.QFrame):
         self.refreshMetrics()
         self.update()
 
-    def setMinimumFieldWidth(self, width: int) -> None:
-        """The width the field keeps while its content is narrower.
-
-        For a column of controls of one width. The field sets its own width
-        again on every capture and change, so a caller's setFixedWidth lasts
-        only until the next key (user report, 2026-11-13).
-        """
-        self._minimum_width = max(0, int(width))
-        self.refreshMetrics()
-
     def refreshMetrics(self) -> None:
-        self.setFixedWidth(max(self.sizeHint().width(), self._minimum_width))
+        # The field keeps the width of its own content (settings-proportions:
+        # a control is not stretched to fill a column), and takes it again on
+        # every capture and change. A caller's setFixedWidth lasts only until
+        # the next key, which made a stretched field shrink after one (user
+        # report, 2026-11-13).
+        self.setFixedWidth(self.sizeHint().width())
         self.updateGeometry()
 
     def _scale(self) -> float:
