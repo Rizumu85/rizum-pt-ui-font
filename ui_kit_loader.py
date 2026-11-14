@@ -12,6 +12,7 @@ from pathlib import Path
 UI_KIT_MODULE = "rizum_ui"
 LOCALIZATION_MODULE = "_rizum_ui_font_localization"
 EXIT_GUARD_MODULE = "_rizum_ui_font_exit_guard"
+WINDOW_INPUT_MODULE = "_rizum_ui_font_window_input"
 SIBLING_OVERRIDE_ENV = "RIZUM_UI_FONT_USE_SIBLING_PRETTIER"
 
 REQUIRED_UI_KIT_FEATURES = (
@@ -88,6 +89,15 @@ def load_exit_guard(plugin_root, env=None):
     then builds plain Qt widgets, but the font watcher still filters events.
     """
     return _load_standalone(plugin_root, "exit_guard.py", EXIT_GUARD_MODULE, env)
+
+
+def load_window_input(plugin_root, env=None):
+    """Load the UI kit's window input watch without the widget kit.
+
+    The live font watch needs it whichever panel is shown: the plain Qt
+    panel applies fonts like the kit's.
+    """
+    return _load_standalone(plugin_root, "window_input.py", WINDOW_INPUT_MODULE, env)
 
 
 def _load_standalone(plugin_root, filename, module_name, env=None):

@@ -19,6 +19,7 @@ SHIPPED_PATHS = (
     "__init__.py",
     "font_catalog.py",
     "font_session.py",
+    "font_watch.py",
     "ui_kit_loader.py",
     "plugin.json",
     "fonts",

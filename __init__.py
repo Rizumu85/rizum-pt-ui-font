@@ -15,14 +15,24 @@ if str(_PLUGIN_ROOT) not in sys.path:
 
 from font_catalog import FontCatalog, QtFontDatabaseAdapter
 from font_session import FontSession, FontState, QSettingsFontSettings, QtFontApplier
+from font_watch import LiveFontWatch
 from ui_kit_loader import load_exit_guard as _load_exit_guard
 from ui_kit_loader import load_localization as _load_localization
 from ui_kit_loader import load_ui_kit as _load_bundled_ui_kit
+from ui_kit_loader import load_window_input as _load_window_input
 
 _PANEL = None
 _DOCK = None
 _EXIT_GUARD = None
 _GUI_READY_CONNECTED = False
+# (event type, callback) for each Painter event the live font watch follows.
+_PAINTER_EVENTS = []
+# Painter's main window, kept while the plugin runs and let go when it
+# closes: a widget found through a wrapper is only good while that wrapper
+# lives (the UI kit's docs/integration.md, "Painter's Widgets And Painter's
+# Exit").
+_MAIN_WINDOW = None
+_LAYERS_DOCK = "LayersStackView"
 _STARTUP_SURFACE_READY = False
 _STARTUP_SURFACE_PREPARING = False
 _STARTUP_VISIBILITY_SETTLING = False
@@ -40,6 +50,7 @@ _HINT_ROW_MIN_WIDTH = 88
 _HINT_ROW_MAX_WIDTH = 150
 _localization = _load_localization(_PLUGIN_ROOT)
 _exit_guard = _load_exit_guard(_PLUGIN_ROOT)
+_window_input = _load_window_input(_PLUGIN_ROOT)
 _DEFAULT_LANGUAGE = _localization.DEFAULT_LANGUAGE
 _I18N_DIR = _PLUGIN_ROOT / "i18n"
 _FALLBACK_TEXT = {
@@ -129,8 +140,10 @@ class UiScalePanel:
             ),
         )
         # Painter builds panels after startup and after a project opens; the
-        # watcher puts each widget onto the live font as it is shown.
-        self._watcher = _LiveFontWatcher(self.session.applier, self)
+        # watch puts each widget onto the live size as it is shown.
+        self.watch = LiveFontWatch(
+            self.session.applier, self._is_host_widget, _window_input.WindowInputWatch
+        )
         # The plugin's deferred work waits in timers under this object, so
         # close() can stop it: a QTimer.singleShot call cannot be cancelled
         # and ran after the plugin had closed.
@@ -140,13 +153,6 @@ class UiScalePanel:
         self._settle_timer.setInterval(0)
         self._settle_timer.timeout.connect(self.session.applier.settle_pending)
         self.session.applier.request_settle = self._settle_timer.start
-        # The watcher is an application event filter: Painter calls it for
-        # every event it sends, 400 a second when idle and 3,000 to 5,000
-        # while a stroke is painted, which took 4 to 17 ms of each second
-        # (measured 2026-11-13 with the UI kit's tools/painter_perf_check.py).
-        # It is only installed while a font is applied; with Painter's own
-        # font there is nothing for it to keep.
-        self._watching = False
         self.session.applier.state_applied = self._watch_for
         self._watch_for(self.session.applier._applied_state)
         self._base_panel_stylesheet = ""
@@ -606,22 +612,24 @@ class UiScalePanel:
         timer.timeout.connect(timer.deleteLater)
         timer.start(delay)
 
+    def _is_host_widget(self, obj):
+        """True for a widget of Painter's: not this panel, not a sibling's."""
+        if not obj.isWidgetType() or self.owns_widget(obj):
+            return False
+        return not _is_sibling_plugin_widget(obj)
+
     def _watch_for(self, state):
-        app = self.QtWidgets.QApplication.instance()
-        wanted = app is not None and not state.is_default()
-        if wanted == self._watching:
-            return
-        self._watching = wanted
-        if wanted:
-            app.installEventFilter(self._watcher)
+        # Only a size needs the watch. A new widget inherits the family and
+        # the hinting from its parent or the application, and Painter's
+        # style sheet gives it Painter's size, which at scale 1.0 is the
+        # live size (menus and parameter panels included).
+        if state.scale == 1.0 or self.QtWidgets.QApplication.instance() is None:
+            self.watch.stop()
         else:
-            app.removeEventFilter(self._watcher)
+            self.watch.start()
 
     def close(self):
-        app = self.QtWidgets.QApplication.instance()
-        if app is not None:
-            app.removeEventFilter(self._watcher)
-        self._watching = False
+        self.watch.stop()
         for timer in self._timers.findChildren(self.QtCore.QTimer):
             timer.stop()
         self.session.applier.forget_pending()
@@ -879,10 +887,11 @@ def start_plugin():
 
     global _DOCK, _PANEL, _STARTUP_SURFACE_READY, _STARTUP_SURFACE_PREPARING
     global _STARTUP_VISIBILITY_SETTLING, _STARTUP_PANEL_VISIBLE, _STARTUP_FIRST_RUN
-    global _EXIT_GUARD
+    global _EXIT_GUARD, _MAIN_WINDOW
     _STARTUP_SURFACE_READY = False
     _STARTUP_SURFACE_PREPARING = False
     _EXIT_GUARD = _exit_guard.install()
+    _MAIN_WINDOW = sp.ui.get_main_window()
     _PANEL = UiScalePanel()
     _STARTUP_FIRST_RUN = _PANEL.is_first_run()
     _STARTUP_PANEL_VISIBLE = _STARTUP_FIRST_RUN or _PANEL.panel_should_start_visible()
@@ -892,6 +901,7 @@ def start_plugin():
     _DOCK.setObjectName("RizumUiFontDock")
     _DOCK.hide()
     _DOCK.setWindowTitle(_PANEL._tr("panel_title"))
+    _connect_painter_events()
     _connect_floating_resize()
     _connect_dock_visibility()
     if _gui_ready_marked() or _host_window_visible():
@@ -918,7 +928,7 @@ def close_plugin():
 
     global _DOCK, _PANEL, _STARTUP_SURFACE_READY, _STARTUP_SURFACE_PREPARING
     global _STARTUP_VISIBILITY_SETTLING, _STARTUP_FIRST_RUN
-    global _EXIT_GUARD
+    global _EXIT_GUARD, _MAIN_WINDOW
     _exit_guard.remove(_EXIT_GUARD)
     _EXIT_GUARD = None
     language = _PANEL.language if _PANEL is not None else _DEFAULT_LANGUAGE
@@ -927,12 +937,14 @@ def close_plugin():
     _STARTUP_VISIBILITY_SETTLING = False
     _STARTUP_FIRST_RUN = False
     _disconnect_gui_ready_refresh()
+    _disconnect_painter_events()
     if _PANEL is not None:
         _PANEL.close()
         _PANEL = None
     if _DOCK is not None:
         sp.ui.delete_ui_element(_DOCK)
         _DOCK = None
+    _MAIN_WINDOW = None
     sp.logging.info(_TEXT.get(language, _TEXT[_DEFAULT_LANGUAGE])["unloaded"])
 def _connect_floating_resize():
     try:
@@ -948,6 +960,88 @@ def _connect_dock_visibility():
         _DOCK.toggleViewAction().toggled.connect(_on_dock_toggle_requested)
     except Exception:
         pass
+
+
+def _connect_painter_events():
+    """Tell the live font watch when Painter builds widgets without any input.
+
+    A project that loads, a bake and an export keep Painter busy and end in
+    new panels long after the click that started them; Painter rebuilds the
+    Assets path bar while it reads its shelves; a script or another plugin
+    changes the layer stack with no click at all.
+    """
+    import substance_painter as sp
+
+    for kind, callback in (
+        (sp.event.BusyStatusChanged, _on_painter_busy),
+        (sp.event.ShelfCrawlingStarted, _on_shelf_crawling),
+        (sp.event.ShelfCrawlingEnded, _on_shelf_crawling),
+        (sp.event.ProjectEditionEntered, _on_painter_changed),
+        (sp.event.ProjectEditionLeft, _on_painter_changed),
+        (sp.event.LayerStacksModelDataChanged, _on_layer_stack_changed),
+    ):
+        sp.event.DISPATCHER.connect_strong(kind, callback)
+        _PAINTER_EVENTS.append((kind, callback))
+    # Painter is reading its shelves when it starts the plugins.
+    _on_shelf_crawling(None)
+
+
+def _disconnect_painter_events():
+    import substance_painter as sp
+
+    while _PAINTER_EVENTS:
+        sp.event.DISPATCHER.disconnect(*_PAINTER_EVENTS.pop())
+
+
+def _on_painter_busy(event):
+    if _PANEL is not None:
+        _PANEL.watch.hold("busy", event.busy)
+
+
+def _on_shelf_crawling(_event):
+    # Asked of the shelves instead of counted from the events: one that was
+    # missed would leave the watch awake for good.
+    import substance_painter as sp
+
+    if _PANEL is not None:
+        _PANEL.watch.hold(
+            "shelves", any(shelf.is_crawling() for shelf in sp.resource.Shelves.all())
+        )
+
+
+def _on_painter_changed(_event):
+    if _PANEL is not None:
+        _PANEL.watch.wake()
+
+
+def _on_layer_stack_changed(_event):
+    """Painter changed its layers, perhaps with no input before it.
+
+    A click on Painter's own buttons wakes the watch before the layer's row
+    is built. A script or another plugin adds a layer with no click, and the
+    row is already built and shown when Painter sends this (measured
+    2026-11-14: such a row stayed at Painter's size). So when the watch was
+    resting, the Layers panel is gone through once.
+    """
+    if _PANEL is None:
+        return
+    if _PANEL.watch.resting:
+        _apply_to_layers_panel()
+    _PANEL.watch.wake()
+
+
+def _apply_to_layers_panel():
+    from PySide6 import QtWidgets
+
+    # By its name: the search must return nothing but Painter's own dock.
+    dock = _MAIN_WINDOW.findChild(QtWidgets.QDockWidget, _LAYERS_DOCK)
+    content = dock.widget() if dock is not None else None
+    if content is None:
+        return
+    applier = _PANEL.session.applier
+    applier.apply_to_widget(content)
+    for widget in content.findChildren(QtWidgets.QWidget):
+        applier.apply_to_widget(widget)
 
 
 def _connect_gui_ready_refresh():
@@ -1244,47 +1338,6 @@ def _refresh_widget_font(widget, font):
         pass
 
 
-def _make_live_font_watcher_class():
-    from PySide6 import QtCore
-
-    class LiveFontWatcher(QtCore.QObject):
-        """Keep widgets Painter shows or restyles later on the live font.
-
-        Show arrives after the style polished the widget and before its first
-        paint, so a new panel or dialog appears already at the right size.
-        FontChange catches Painter repolishing a widget back to its
-        stylesheet size; the applier ignores the events it raises itself.
-        """
-
-        _SHOW = QtCore.QEvent.Type.Show
-        _FONT_CHANGE = QtCore.QEvent.Type.FontChange
-
-        def __init__(self, applier, panel):
-            super().__init__()
-            self._applier = applier
-            self._panel = panel
-
-        def eventFilter(self, obj, event):
-            kind = event.type()
-            if kind == self._SHOW:
-                if self._is_host_widget(obj):
-                    self._applier.apply_to_widget(obj)
-            elif kind == self._FONT_CHANGE:
-                # Each preview step raises one FontChange per widget while
-                # the applier is at work, and it ignores those: skip the
-                # ancestor walk for them.
-                if not self._applier.applying and self._is_host_widget(obj):
-                    self._applier.widget_font_changed(obj)
-            return False
-
-        def _is_host_widget(self, obj):
-            if not obj.isWidgetType() or self._panel.owns_widget(obj):
-                return False
-            return not _is_sibling_plugin_widget(obj)
-
-    return LiveFontWatcher
-
-
 def _is_sibling_plugin_widget(widget):
     """True inside another Rizum plugin's panel or dialog.
 
@@ -1306,12 +1359,6 @@ def _is_sibling_plugin_widget(widget):
         except Exception:
             return False
     return False
-
-
-
-
-def _LiveFontWatcher(applier, panel):
-    return _make_live_font_watcher_class()(applier, panel)
 
 
 def _set_widget_font(widget, font):

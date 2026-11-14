@@ -127,30 +127,68 @@ class UiScalePanelTests(unittest.TestCase):
         # The stored value is left alone so the font comes back once re-added.
         self.assertEqual(self.settings.value("font_family"), "Font That Was Deleted")
 
-    def test_the_watcher_is_only_installed_while_a_font_is_applied(self):
-        # It is an application event filter, called for every event Painter
-        # sends; with Painter's own font it has nothing to keep.
+    def test_the_watch_runs_only_for_a_size_other_than_painters(self):
+        # Its filter on the application is called for every event Painter
+        # sends, so it exists only where a new widget would come out wrong:
+        # Painter's style sheet gives a new widget Painter's size.
         panel = self.panel
-        calls = []
-        watcher = panel._watcher
-        original = watcher.eventFilter
-        watcher.eventFilter = lambda obj, event: calls.append(event.type()) or original(obj, event)
-
-        def other_events():
-            calls.clear()
-            QtCore.QCoreApplication.sendEvent(panel.widget, QtCore.QEvent(QtCore.QEvent.Type.User))
-            return len(calls)
-
-        self.assertFalse(panel._watching)
-        self.assertEqual(other_events(), 0)
+        self.assertFalse(panel.watch.awake)
         panel.session.preview(plugin.FontState(scale=1.25))
-        self.app.processEvents()
-        self.assertTrue(panel._watching)
-        self.assertGreater(other_events(), 0)
+        self.assertTrue(panel.watch.awake)
+        panel.session.preview(plugin.FontState(scale=1.0, family="MiSans"))
+        self.assertFalse(panel.watch.awake)
+        panel.session.preview(plugin.FontState(scale=0.9, family="MiSans"))
+        self.assertTrue(panel.watch.awake)
         panel.session.restore_original()
-        self.app.processEvents()
-        self.assertFalse(panel._watching)
-        self.assertEqual(other_events(), 0)
+        self.assertFalse(panel.watch.awake)
+
+    def test_a_family_alone_reaches_new_widgets_without_the_watch(self):
+        panel = self.panel
+        panel.session.preview(plugin.FontState(scale=1.0, family="MiSans"))
+        self.assertFalse(panel.watch.awake)
+        base_pt = panel.original_font.pointSizeF()
+
+        parent = QtWidgets.QWidget()
+        self.addCleanup(parent.deleteLater)
+        child = QtWidgets.QLabel("late", parent)
+        parent.show()
+
+        self.assertEqual(child.font().family(), "MiSans")
+        self.assertAlmostEqual(child.font().pointSizeF(), base_pt, delta=0.05)
+
+    def test_a_layer_added_by_a_script_is_put_on_the_live_font(self):
+        # No click wakes the watch for it, and its row is already shown when
+        # Painter reports the change.
+        host_qss = "QLabel { font-size: 11px; }"
+        saved_qss = self.app.styleSheet()
+        self.app.setStyleSheet(host_qss)
+        self.addCleanup(self.app.setStyleSheet, saved_qss)
+        panel = self.panel
+        window = QtWidgets.QMainWindow()
+        self.addCleanup(window.deleteLater)
+        dock = QtWidgets.QDockWidget(window)
+        dock.setObjectName(plugin._LAYERS_DOCK)
+        dock.setWidget(QtWidgets.QWidget())
+        window.addDockWidget(QtCore.Qt.DockWidgetArea.RightDockWidgetArea, dock)
+        window.show()
+        saved = (plugin._PANEL, plugin._MAIN_WINDOW)
+        plugin._PANEL, plugin._MAIN_WINDOW = panel, window
+        self.addCleanup(lambda: (setattr(plugin, "_PANEL", saved[0]), setattr(plugin, "_MAIN_WINDOW", saved[1])))
+
+        panel.watch._hold.setInterval(20)
+        panel.session.preview(plugin.FontState(scale=1.25, family="MiSans"))
+        deadline = QtCore.QDeadlineTimer(1000)
+        while panel.watch.awake and not deadline.hasExpired():
+            self.app.processEvents(QtCore.QEventLoop.ProcessEventsFlag.AllEvents, 20)
+        self.assertTrue(panel.watch.resting)
+
+        row = QtWidgets.QLabel("row", dock.widget())
+        row.show()
+        self.assertEqual(QtGui.QFontInfo(row.font()).pixelSize(), 11)
+
+        plugin._on_layer_stack_changed(None)
+        self.assertGreater(QtGui.QFontInfo(row.font()).pixelSize(), 11)
+        self.assertTrue(panel.watch.awake)
 
     def test_preview_keeps_other_widgets_own_fonts(self):
         panel = self.panel
