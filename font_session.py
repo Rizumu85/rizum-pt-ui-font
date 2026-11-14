@@ -107,6 +107,8 @@ class QtFontApplier:
         self._pending = []
         # Asks for settle_pending() on the next turn (set by the panel).
         self.request_settle = None
+        # Told the state each time one has been applied (set by the panel).
+        self.state_applied = None
 
     def build_font(self, state):
         state = FontState.from_value(state)
@@ -260,6 +262,8 @@ class QtFontApplier:
                 else:
                     self._apply_widget(widget, baseline, fonts)
             self._applied_state = state
+            if self.state_applied is not None:
+                self.state_applied(state)
             self.refresh_panel(font)
         finally:
             self.applying = False

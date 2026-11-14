@@ -140,7 +140,15 @@ class UiScalePanel:
         self._settle_timer.setInterval(0)
         self._settle_timer.timeout.connect(self.session.applier.settle_pending)
         self.session.applier.request_settle = self._settle_timer.start
-        QtWidgets.QApplication.instance().installEventFilter(self._watcher)
+        # The watcher is an application event filter: Painter calls it for
+        # every event it sends, 400 a second when idle and 3,000 to 5,000
+        # while a stroke is painted, which took 4 to 17 ms of each second
+        # (measured 2026-11-13 with the UI kit's tools/painter_perf_check.py).
+        # It is only installed while a font is applied; with Painter's own
+        # font there is nothing for it to keep.
+        self._watching = False
+        self.session.applier.state_applied = self._watch_for
+        self._watch_for(self.session.applier._applied_state)
         self._base_panel_stylesheet = ""
         self._styled_rows = {}
 
@@ -598,10 +606,22 @@ class UiScalePanel:
         timer.timeout.connect(timer.deleteLater)
         timer.start(delay)
 
+    def _watch_for(self, state):
+        app = self.QtWidgets.QApplication.instance()
+        wanted = app is not None and not state.is_default()
+        if wanted == self._watching:
+            return
+        self._watching = wanted
+        if wanted:
+            app.installEventFilter(self._watcher)
+        else:
+            app.removeEventFilter(self._watcher)
+
     def close(self):
         app = self.QtWidgets.QApplication.instance()
         if app is not None:
             app.removeEventFilter(self._watcher)
+        self._watching = False
         for timer in self._timers.findChildren(self.QtCore.QTimer):
             timer.stop()
         self.session.applier.forget_pending()
