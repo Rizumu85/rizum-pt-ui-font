@@ -109,6 +109,19 @@ class QtFontApplier:
         self.request_settle = None
         # Told the state each time one has been applied (set by the panel).
         self.state_applied = None
+        # Told that an apply to every widget begins (set by the panel).
+        self.apply_starting = None
+        self._menu_types = tuple(
+            cls for cls in (
+                getattr(QtWidgets, "QMenuBar", None),
+                getattr(QtWidgets, "QMenu", None),
+            ) if isinstance(cls, type)
+        )
+        dock_type = getattr(QtWidgets, "QDockWidget", None)
+        self._dock_type = dock_type if isinstance(dock_type, type) else None
+        # The fonts of the state applied last, kept between applies: Painter
+        # has some nine thousand widgets and a few dozen different fonts.
+        self._fonts = None
 
     def build_font(self, state):
         state = FontState.from_value(state)
@@ -151,7 +164,7 @@ class QtFontApplier:
             return False
         self.applying = True
         try:
-            self._apply_widget(widget, baseline, self._fonts_by_role(state))
+            self._apply_widget(widget, baseline, self._fonts_for(state), self._role(widget))
         finally:
             self.applying = False
         return True
@@ -248,6 +261,8 @@ class QtFontApplier:
         app = self.QtWidgets.QApplication.instance()
         if app is None:
             return False
+        if self.apply_starting is not None:
+            self.apply_starting()
         widgets = tuple(app.allWidgets())
         # Record baselines before setFont propagates into inheriting widgets.
         baselines = [self._baseline(widget) for widget in widgets]
@@ -255,12 +270,17 @@ class QtFontApplier:
         self.applying = True
         try:
             app.setFont(font)
-            fonts = self._fonts_by_role(state, font)
+            fonts = self._fonts_for(state, font)
+            # Whether a parent is inside a parameter panel, for this apply
+            # only: siblings share the answer, and the panels may be laid
+            # out differently by the next apply.
+            in_fit_dock = {}
             for widget, baseline in zip(widgets, baselines):
+                role = self._role(widget, in_fit_dock)
                 if baseline is None:
-                    self.refresh_widget(widget, fonts[self._role(widget)][1])
+                    self.refresh_widget(widget, fonts.by_role[role][1])
                 else:
-                    self._apply_widget(widget, baseline, fonts)
+                    self._apply_widget(widget, baseline, fonts, role)
             self._applied_state = state
             if self.state_applied is not None:
                 self.state_applied(state)
@@ -269,48 +289,78 @@ class QtFontApplier:
             self.applying = False
         return True
 
-    def _fonts_by_role(self, state, font=None):
-        """(state, font) for each widget role under the applied ``state``."""
+    def _fonts_for(self, state, font=None):
+        """The fonts of ``state``: one for each role, then one for each baseline."""
+        fonts = self._fonts
+        if fonts is not None and fonts.state == state and (font is None or fonts.font == font):
+            return fonts
         if font is None:
             font = self.build_font(state)
         menu_state = _menu_state(state)
         fit_state = FontState(scale=1.0, family=state.family, hinting=state.hinting)
-        return {
+        fonts = self._fonts = _StateFonts(state, font, {
             "menu": (menu_state, self.build_font(menu_state)),
             "fit": (fit_state, self.build_font(fit_state)),
             "text": (state, font),
-        }
+        })
+        return fonts
 
-    def _role(self, widget):
-        if self._is_menu(widget):
+    def _role(self, widget, in_fit_dock=None):
+        if self._menu_types and isinstance(widget, self._menu_types):
             return "menu"
-        if self._in_fit_dock(widget):
+        if self._in_fit_dock(widget, in_fit_dock):
             return "fit"
         return "text"
 
-    def _in_fit_dock(self, widget):
-        """True for content (not the title bar) of a parameter-panel dock."""
-        QDockWidget = getattr(self.QtWidgets, "QDockWidget", None)
-        if not isinstance(QDockWidget, type):
+    def _in_fit_dock(self, widget, known=None):
+        """True for content (not the title bar) of a parameter-panel dock.
+
+        ``known`` remembers the answer for each parent met on the way up, so
+        a widget whose parent was already asked about costs one step.
+        """
+        dock_type = self._dock_type
+        if dock_type is None:
             return False
+        answer = None
+        climbed = []
         node = widget
         try:
             for _ in range(32):
                 parent = node.parent()
                 if parent is None:
-                    return False
-                if isinstance(parent, QDockWidget):
-                    return parent.objectName() in _FIT_DOCK_NAMES and node is parent.widget()
+                    answer = False
+                    break
+                if isinstance(parent, dock_type):
+                    answer = parent.objectName() in _FIT_DOCK_NAMES and node is parent.widget()
+                    break
+                if known is not None:
+                    if parent in known:
+                        answer = known[parent]
+                        break
+                    climbed.append(parent)
                 node = parent
         except Exception:
             return False
-        return False
+        if answer is None:
+            # Deeper than the walk goes: no answer to remember.
+            return False
+        for parent in climbed:
+            known[parent] = answer
+        return answer
 
-    def _apply_widget(self, widget, baseline, fonts):
-        state, font = fonts[self._role(widget)]
-        widget_font = self._widget_font(font, baseline, state)
+    def _apply_widget(self, widget, baseline, fonts, role):
+        state, font = fonts.by_role[role]
+        if state.is_default():
+            widget_font = self._widget_font(font, baseline, state)
+        else:
+            # Everything a widget's font takes from its baseline is in the
+            # baseline's key, so widgets with the same key share one font.
+            key = (role, baseline.key())
+            widget_font = fonts.by_baseline.get(key)
+            if widget_font is None:
+                widget_font = fonts.by_baseline[key] = self._widget_font(font, baseline, state)
         try:
-            widget.setProperty(_TARGET_FONT_PROPERTY, self.QtGui.QFont(widget_font))
+            widget.setProperty(_TARGET_FONT_PROPERTY, widget_font)
         except Exception:
             pass
         self.refresh_widget(widget, widget_font)
@@ -400,15 +450,6 @@ class QtFontApplier:
         applied_size = self._point_size(self.build_font(state))
         return abs(self._point_size(font) - applied_size) < 0.05
 
-    def _is_menu(self, widget):
-        types = tuple(
-            cls for cls in (
-                getattr(self.QtWidgets, "QMenuBar", None),
-                getattr(self.QtWidgets, "QMenu", None),
-            ) if isinstance(cls, type)
-        )
-        return bool(types) and isinstance(widget, types)
-
     def _is_monospace(self, font):
         QFont = self.QtGui.QFont
         try:
@@ -421,6 +462,18 @@ class QtFontApplier:
             return bool(self.QtGui.QFontInfo(font).fixedPitch())
         except Exception:
             return False
+
+
+class _StateFonts:
+    """The fonts one applied state gives the widgets."""
+
+    __slots__ = ("state", "font", "by_role", "by_baseline")
+
+    def __init__(self, state, font, by_role):
+        self.state = state
+        self.font = font
+        self.by_role = by_role
+        self.by_baseline = {}
 
 
 def _same_size(font, other):

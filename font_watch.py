@@ -179,6 +179,15 @@ class LiveFontWatch(QtCore.QObject):
             QtWidgets.QApplication.instance().installEventFilter(self._widgets)
         self._hold.start()
 
+    def pause(self):
+        """Takes the filter off until the next wake.
+
+        For an apply to every widget: each widget gets several events from
+        it, all of them the applier's own, and the apply ends in a wake.
+        """
+        self._hold.stop()
+        self._remove_filter()
+
     def hold(self, reason, held):
         """Keeps the filter for as long as ``reason`` lasts, and the hold time after."""
         if held:

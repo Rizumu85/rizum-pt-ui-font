@@ -142,6 +142,25 @@ class UiScalePanelTests(unittest.TestCase):
         panel.session.restore_original()
         self.assertFalse(panel.watch.awake)
 
+    def test_an_apply_to_every_widget_runs_with_the_watch_paused(self):
+        panel = self.panel
+        panel.session.preview(plugin.FontState(scale=1.2))
+        self.assertTrue(panel.watch.awake)
+        applier = panel.session.applier
+        set_font = applier.refresh_widget
+        awake_during = []
+
+        def refresh(widget, font):
+            awake_during.append(panel.watch.awake)
+            set_font(widget, font)
+
+        applier.refresh_widget = refresh
+        panel.session.preview(plugin.FontState(scale=1.3))
+
+        self.assertTrue(awake_during)
+        self.assertFalse(any(awake_during))
+        self.assertTrue(panel.watch.awake)
+
     def test_a_family_alone_reaches_new_widgets_without_the_watch(self):
         panel = self.panel
         panel.session.preview(plugin.FontState(scale=1.0, family="MiSans"))
@@ -245,6 +264,83 @@ class UiScalePanelTests(unittest.TestCase):
         panel.session.restore_original()
         self.app.processEvents()
         self.assertAlmostEqual(small.font().pointSizeF(), small_font.pointSizeF(), places=2)
+
+    def test_widgets_with_one_baseline_share_a_font_and_others_keep_their_traits(self):
+        # One font is built for all the widgets with the same baseline, so
+        # every trait a preview keeps has to tell two baselines apart.
+        panel = self.panel
+        QFont = QtGui.QFont
+        changes = {
+            "weight": lambda font: font.setWeight(QFont.Weight.DemiBold),
+            "italic": lambda font: font.setItalic(True),
+            "underline": lambda font: font.setUnderline(True),
+            "strike out": lambda font: font.setStrikeOut(True),
+            "capitalization": lambda font: font.setCapitalization(QFont.Capitalization.SmallCaps),
+            "letter spacing": lambda font: font.setLetterSpacing(
+                QFont.SpacingType.AbsoluteSpacing, 2.0
+            ),
+            "word spacing": lambda font: font.setWordSpacing(3.0),
+        }
+
+        def traits(font):
+            return (
+                font.weight(), font.italic(), font.underline(), font.strikeOut(),
+                font.capitalization(), font.letterSpacingType(), font.letterSpacing(),
+                font.wordSpacing(),
+            )
+
+        plain = [QtWidgets.QLabel("plain"), QtWidgets.QLabel("plain too")]
+        labels = {}
+        for name, change in changes.items():
+            label = QtWidgets.QLabel(name)
+            font = QFont(label.font())
+            change(font)
+            label.setFont(font)
+            labels[name] = (label, traits(font))
+        for label in plain + [label for label, _traits in labels.values()]:
+            self.addCleanup(label.deleteLater)
+        plain_traits = traits(plain[0].font())
+        base_size = panel.original_font.pointSizeF()
+
+        panel.scale.setValue(1.25)
+        self.app.processEvents()
+
+        self.assertEqual(plain[0].font(), plain[1].font())
+        self.assertEqual(traits(plain[0].font()), plain_traits)
+        for name, (label, expected) in labels.items():
+            with self.subTest(name):
+                self.assertEqual(traits(label.font()), expected)
+                self.assertNotEqual(traits(label.font()), plain_traits)
+                self.assertAlmostEqual(label.font().pointSizeF(), base_size * 1.25, places=2)
+
+    def test_parameter_panel_content_is_found_at_any_depth(self):
+        # The apply remembers, for each parent, whether it is inside a
+        # parameter panel; widgets deep in one and deep in another dock must
+        # not take each other's answer.
+        panel = self.panel
+        base_pt = panel.original_font.pointSizeF()
+
+        def nested_dock(name):
+            dock = QtWidgets.QDockWidget(name)
+            dock.setObjectName(name)
+            self.addCleanup(dock.deleteLater)
+            content = QtWidgets.QWidget()
+            group = QtWidgets.QGroupBox("group", content)
+            inner = QtWidgets.QFrame(group)
+            rows = [QtWidgets.QLabel(f"row {index}", inner) for index in range(4)]
+            dock.setWidget(content)
+            self.addCleanup(content.deleteLater)
+            return [group, *rows]
+
+        fitted = nested_dock("Tool")
+        scaled = nested_dock("LayersStackView")
+
+        panel.session.preview(plugin.FontState(scale=1.5, family="MiSans"))
+
+        for widget in fitted:
+            self.assertAlmostEqual(widget.font().pointSizeF(), base_pt, delta=0.05)
+        for widget in scaled:
+            self.assertAlmostEqual(widget.font().pointSizeF(), base_pt * 1.5, delta=0.05)
 
     def test_scale_one_keeps_painter_sizes_and_softening_ramps_in(self):
         panel = self.panel

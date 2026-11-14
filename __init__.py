@@ -21,6 +21,13 @@ from ui_kit_loader import load_localization as _load_localization
 from ui_kit_loader import load_ui_kit as _load_bundled_ui_kit
 from ui_kit_loader import load_window_input as _load_window_input
 
+try:
+    # Imported once: an import statement run for each widget goes through
+    # shiboken's own import hook every time.
+    import shiboken6 as _shiboken
+except Exception:
+    _shiboken = None
+
 _PANEL = None
 _DOCK = None
 _EXIT_GUARD = None
@@ -154,6 +161,7 @@ class UiScalePanel:
         self._settle_timer.timeout.connect(self.session.applier.settle_pending)
         self.session.applier.request_settle = self._settle_timer.start
         self.session.applier.state_applied = self._watch_for
+        self.session.applier.apply_starting = self.watch.pause
         self._watch_for(self.session.applier._applied_state)
         self._base_panel_stylesheet = ""
         self._styled_rows = {}
@@ -1324,20 +1332,6 @@ def _resize_floating_dock_later():
         pass
 
 
-def _refresh_widget_font(widget, font):
-    """Relayout a widget after its font changed."""
-    if not _is_qt_object_alive(widget):
-        return
-    try:
-        widget.updateGeometry()
-    except Exception:
-        pass
-    try:
-        widget.update()
-    except Exception:
-        pass
-
-
 def _is_sibling_plugin_widget(widget):
     """True inside another Rizum plugin's panel or dialog.
 
@@ -1346,14 +1340,13 @@ def _is_sibling_plugin_widget(widget):
     panel sits in is skipped so its Painter-drawn title bar still follows
     the host font.
     """
-    from PySide6 import QtWidgets
-
+    dock_type = _dock_widget_type()
     node = widget
     for _ in range(16):
         if node is None:
             return False
         try:
-            if not isinstance(node, QtWidgets.QDockWidget) and node.objectName().startswith("Rizum"):
+            if not isinstance(node, dock_type) and node.objectName().startswith("Rizum"):
                 return True
             node = node.parent()
         except Exception:
@@ -1361,14 +1354,28 @@ def _is_sibling_plugin_widget(widget):
     return False
 
 
+_DOCK_WIDGET_TYPE = None
+
+
+def _dock_widget_type():
+    global _DOCK_WIDGET_TYPE
+    if _DOCK_WIDGET_TYPE is None:
+        from PySide6 import QtWidgets
+
+        _DOCK_WIDGET_TYPE = QtWidgets.QDockWidget
+    return _DOCK_WIDGET_TYPE
+
+
 def _set_widget_font(widget, font):
+    """Give a widget its font and have it laid out and painted again."""
     if not _is_qt_object_alive(widget):
         return
     try:
         widget.setFont(font)
+        widget.updateGeometry()
+        widget.update()
     except Exception:
-        return
-    _refresh_widget_font(widget, font)
+        pass
 
 
 def _refresh_widget_tree_font(root, font):
@@ -1390,9 +1397,7 @@ def _is_qt_object_alive(obj):
     if obj is None:
         return False
     try:
-        import shiboken6
-
-        return shiboken6.isValid(obj)
+        return _shiboken.isValid(obj)
     except Exception:
         try:
             obj.objectName()

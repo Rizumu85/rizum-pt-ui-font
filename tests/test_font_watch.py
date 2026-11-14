@@ -117,6 +117,18 @@ class LiveFontWatchTests(unittest.TestCase):
         self.show_event()
         self.assertEqual(self.applier.shown, [])
 
+    def test_a_pause_takes_the_filter_off_until_the_next_wake(self):
+        self.watch.start()
+        self.watch.hold("busy", True)
+        self.watch.pause()
+        self.assertFalse(self.watch.awake)
+        self.show_event()
+        self.assertEqual(self.applier.shown, [])
+
+        self.watch.wake()
+        self.show_event()
+        self.assertEqual(self.applier.shown, [self.label])
+
     def test_a_resting_watch_gets_no_event_of_the_application(self):
         self.started_and_resting()
         calls = []
