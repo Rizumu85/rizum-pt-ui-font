@@ -4,6 +4,7 @@
 
 - **Painter UI Font Panel**: The Substance 3D Painter dock panel that lets users live-preview, save, reset, and undo UI font changes.
 - **Font Session**: The stateful live-preview workflow behind the Painter UI Font Panel, including current font state, undo history, save/reset semantics, close-time revert, and application of font changes to Painter.
+- **Live Font Watch**: The part that puts widgets Painter builds or restyles after an apply onto the live size (`font_watch.py`). Its filter on the application is installed only for a short while after something that can make Painter build widgets, never during strokes or camera drags, and not at all at scale 1.0.
 - **Font Catalog**: The font discovery workflow behind the Painter UI Font Panel, including the system default option, supported font file extensions, Qt font-database loading, duplicate-family handling, and stable option ordering.
 - **Bundled UI Kit**: The vendored `rizum_ui/` and `icons/` files shipped inside this plugin so the panel works without a separate `rizum-pt-ui-prettier` installation.
 - **Sibling UI Kit Override**: The development-only path enabled by `RIZUM_UI_FONT_USE_SIBLING_PRETTIER=1`, which loads `../rizum-pt-ui-prettier/rizum_ui` instead of the bundled UI kit.
